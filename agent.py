@@ -248,34 +248,66 @@ def er_enk(orgform: str) -> bool:
 # ─────────────────────────────────────────────
 def finn_url_og_info(navn: str, client) -> dict:
     bransje_liste = ", ".join(BRANSJER)
-    prompt = f"""Finn informasjon om denne norske nettbutikken: "{navn}"
+    prompt = f"""Søk på nettet og finn informasjon om denne norske nettbutikken: "{navn}"
+
+Finn URL-en til nettbutikken, offisielt selskapsnavn og bransje.
 
 Svar KUN med JSON uten markdown:
 {{"url": "https://...", "selskapsnavn": "Offisielt AS-navn fra Brreg", "bransje": "velg fra: {bransje_liste}", "land": "NO", "omsetning_est": "Under 50 mill", "selger_b2c_fysisk": true, "skandinavisk_tilstedevarelse": true, "kommentar": "kort begrunnelse"}}
 
 For omsetning_est velg: Under 50 mill, 50-250 mill, Over 250 mill, Ukjent
-For selskapsnavn: skriv det juridiske selskapsnavnet (f.eks Linda JC AS for Linda Johansen)"""
+For selskapsnavn: skriv det juridiske selskapsnavnet (f.eks Linda JC AS for Linda Johansen)
+Hvis ikke funnet: url = "" """
 
-    try:
-        resp = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=600,
-            tools=[{"type": "web_search_20250305", "name": "web_search"}],
-            messages=[{"role": "user", "content": prompt}]
-        )
-        tekst = ""
-        for blokk in resp.content:
-            if blokk.type == "text":
-                tekst += blokk.text + "\n"
-        data = parse_json(tekst)
-        if data:
-            return data
-    except Exception:
-        pass
+    for forsok in range(2):
+        try:
+            resp = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=800,
+                tools=[{"type": "web_search_20250305", "name": "web_search"}],
+                messages=[{"role": "user", "content": prompt}]
+            )
+
+            # Hent ALL tekst fra alle blokker inkludert tool_result
+            tekst = ""
+            for blokk in resp.content:
+                if hasattr(blokk, "type"):
+                    if blokk.type == "text":
+                        tekst += blokk.text + "\n"
+                    elif blokk.type == "tool_result":
+                        # Tool result kan inneholde søkeresultater
+                        if hasattr(blokk, "content"):
+                            for c in blokk.content:
+                                if hasattr(c, "text"):
+                                    tekst += c.text + "\n"
+
+            # Prøv å parse JSON fra teksten
+            data = parse_json(tekst)
+            if data and data.get("url", "").startswith("http"):
+                return data
+
+            # Hvis første forsøk ikke ga URL, prøv uten websøk
+            if forsok == 0:
+                resp2 = client.messages.create(
+                    model="claude-sonnet-4-6",
+                    max_tokens=600,
+                    messages=[{"role": "user", "content": f"""Hva er URL-en til den norske nettbutikken "{navn}"?
+Svar KUN med JSON:
+{{"url": "https://...", "selskapsnavn": "navn AS", "bransje": "velg fra: {bransje_liste}", "land": "NO", "omsetning_est": "Under 50 mill", "selger_b2c_fysisk": true, "skandinavisk_tilstedevarelse": true, "kommentar": "begrunnelse"}}"""}]
+                )
+                tekst2 = resp2.content[0].text if resp2.content else ""
+                data2 = parse_json(tekst2)
+                if data2 and data2.get("url", "").startswith("http"):
+                    return data2
+
+        except Exception as e:
+            if forsok == 0:
+                time.sleep(2)
+
     return {
         "url": "", "selskapsnavn": navn, "bransje": "Annet", "land": "Ukjent",
         "omsetning_est": "Ukjent", "selger_b2c_fysisk": True,
-        "skandinavisk_tilstedevarelse": True, "kommentar": "Ikke funnet"
+        "skandinavisk_tilstedevarelse": True, "kommentar": "URL ikke funnet"
     }
 
 
@@ -307,8 +339,6 @@ def klassifiser(regnskap: dict, info: dict) -> tuple:
 def ko_sjekk(brreg: dict, info: dict) -> tuple:
     if er_enk(brreg.get("orgform", "")) and not brreg.get("usikker", False):
         return True, "ENK bekreftet – enkeltmannsforetak filtreres ut"
-    if not info.get("url", ""):
-        return True, "Kunne ikke identifisere nettbutikk – ingen URL funnet"
     return False, ""
 
 
@@ -316,6 +346,8 @@ def bygg_advarsler(brreg: dict, info: dict) -> list:
     advarsler = []
     if brreg.get("usikker"):
         advarsler.append("Brreg-treff usikkert – org.form bør verifiseres manuelt")
+    if not info.get("url", ""):
+        advarsler.append("Ingen URL funnet – agenten klarte ikke å identifisere nettbutikken. Sjekk manuelt.")
     if not info.get("selger_b2c_fysisk", True):
         advarsler.append("Agenten er usikker på om dette er B2C fysiske varer – sjekk manuelt")
     if not info.get("skandinavisk_tilstedevarelse", True):
@@ -442,10 +474,17 @@ Svar KUN med JSON:
                     tools=[{"type": "web_search_20250305", "name": "web_search"}],
                     messages=[{"role": "user", "content": prompt}]
                 )
+                # Hent tekst fra alle blokker inkludert tool_result
                 tekst = ""
                 for blokk in resp.content:
-                    if blokk.type == "text":
-                        tekst += blokk.text + "\n"
+                    if hasattr(blokk, "type"):
+                        if blokk.type == "text":
+                            tekst += blokk.text + "\n"
+                        elif blokk.type == "tool_result":
+                            if hasattr(blokk, "content"):
+                                for c in blokk.content:
+                                    if hasattr(c, "text"):
+                                        tekst += c.text + "\n"
                 data = parse_json(tekst)
                 if data:
                     return data
