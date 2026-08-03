@@ -236,6 +236,28 @@ with st.sidebar:
     else:
         api_key = st.text_input("API-nøkkel", type="password")
 
+    # Last opp JSON – alltid synlig
+    st.markdown("---")
+    st.markdown("**💾 Last opp resultater**")
+    opplastet_json = st.file_uploader(
+        "↑ Last opp resultater.json",
+        type=["json"],
+        help="Last opp JSON-fil fra Colab for å se resultatene",
+        key="json_upload"
+    )
+    if opplastet_json is not None:
+        try:
+            innhold = opplastet_json.read()
+            data = json.loads(innhold.decode("utf-8"))
+            if data and isinstance(data, dict):
+                st.session_state.resultater = data
+                lagre_resultater_lokalt(data)
+                st.success(f"✅ {len(data)} butikker lastet inn!")
+            else:
+                st.error("Filen inneholder ingen gyldige data.")
+        except Exception as e:
+            st.error(f"Feil: {e}")
+
     if st.session_state.resultater:
         r = st.session_state.resultater
         st.markdown("---")
@@ -247,7 +269,7 @@ with st.sidebar:
         col2.metric("ENK", sum(1 for v in r.values() if v.get("enk")))
 
         st.markdown("---")
-        st.markdown("**💾 Lagring**")
+        st.markdown("**💾 Last ned**")
 
         # Last ned JSON
         json_str = json.dumps(r, ensure_ascii=False, indent=2)
@@ -258,26 +280,6 @@ with st.sidebar:
             mime="application/json",
             help="Last ned og bevar resultatene. Last opp igjen hvis appen mister data."
         )
-
-        # Last opp JSON
-        opplastet_json = st.file_uploader(
-            "↑ Last opp lagrede resultater",
-            type=["json"],
-            help="Last opp en tidligere lagret JSON-fil for å gjenopprette resultater",
-            key="json_upload"
-        )
-        if opplastet_json is not None:
-            try:
-                innhold = opplastet_json.read()
-                data = json.loads(innhold.decode("utf-8"))
-                if data and isinstance(data, dict):
-                    st.session_state.resultater = data
-                    lagre_resultater_lokalt(data)
-                    st.success(f"✅ {len(data)} butikker lastet inn!")
-                else:
-                    st.error("Filen inneholder ingen gyldige data.")
-            except Exception as e:
-                st.error(f"Feil ved opplasting: {e}")
 
         if st.button("🗑️ Nullstill alle resultater"):
             st.session_state.resultater = {}
