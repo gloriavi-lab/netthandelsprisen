@@ -681,6 +681,7 @@ def kjor_agent(filbane, api_key: str, maks: int = None, fremgang_callback=None) 
         # A – URL og selskapsnavn
         info = finn_url_og_info(navn, client)
         selskapsnavn = info.get("selskapsnavn", navn)
+        url = info.get("url", "")
         time.sleep(3)
 
         # B – Brønnøysund
@@ -697,7 +698,7 @@ def kjor_agent(filbane, api_key: str, maks: int = None, fremgang_callback=None) 
 
         butikk = {
             "name": navn,
-            "url": info.get("url", ""),
+            "url": url,
             "orgform": brreg.get("orgform", "Ukjent"),
             "orgnr": brreg.get("orgnr", ""),
             "enk": er_enk(brreg.get("orgform", "")) and not brreg.get("usikker", False),
@@ -727,17 +728,22 @@ def kjor_agent(filbane, api_key: str, maks: int = None, fremgang_callback=None) 
             butikk["status"] = "ut"
             butikk["screeningBegrunnelse"] = f"Filtrert ut: {aarsak}"
             butikk["kommentar"] = "Filtrert ut i screening."
+        elif not url:
+            butikk["status"] = "usikker"
+            butikk["screeningBegrunnelse"] = f"{brreg.get('orgform','?')}. Ingen URL funnet – kan ikke score."
+            butikk["kommentar"] = "Ingen URL funnet – sjekk manuelt."
+            if fremgang_callback:
+                fremgang_callback(f"[{i+1}/{totalt}] ⚠ Ingen URL for {navn}", prosent)
         else:
             brreg_note = " | Brreg-treff usikkert" if brreg.get("usikker") else ""
             butikk["screeningBegrunnelse"] = (
-                f"{brreg.get('orgform','?')}, {info.get('land','?')}. "
-                f"Klasse {klasse}. {omsetning_tekst}.{brreg_note}"
+                f"{brreg.get('orgform','?')}. Klasse {klasse}. {omsetning_tekst}.{brreg_note}"
             )
 
             if fremgang_callback:
-                fremgang_callback(f"[{i+1}/{totalt}] Scorer: {navn}", prosent)
+                fremgang_callback(f"[{i+1}/{totalt}] Scorer: {navn} ({url})", prosent)
 
-            scoring_raw = score_nettbutikk(navn, info.get("url", ""), klasse, client)
+            scoring_raw = score_nettbutikk(navn, url, klasse, client)
 
             if scoring_raw:
                 totaler = beregn_totalscore(scoring_raw)
