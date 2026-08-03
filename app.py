@@ -263,15 +263,19 @@ with st.sidebar:
         opplastet_json = st.file_uploader(
             "↑ Last opp lagrede resultater",
             type=["json"],
-            help="Last opp en tidligere lagret JSON-fil for å gjenopprette resultater"
+            help="Last opp en tidligere lagret JSON-fil for å gjenopprette resultater",
+            key="json_upload"
         )
-        if opplastet_json:
+        if opplastet_json is not None:
             try:
-                data = json.load(opplastet_json)
-                st.session_state.resultater = data
-                lagre_resultater_lokalt(data)
-                st.success(f"✅ {len(data)} butikker gjenopprettet!")
-                st.rerun()
+                innhold = opplastet_json.read()
+                data = json.loads(innhold.decode("utf-8"))
+                if data and isinstance(data, dict):
+                    st.session_state.resultater = data
+                    lagre_resultater_lokalt(data)
+                    st.success(f"✅ {len(data)} butikker lastet inn!")
+                else:
+                    st.error("Filen inneholder ingen gyldige data.")
             except Exception as e:
                 st.error(f"Feil ved opplasting: {e}")
 
