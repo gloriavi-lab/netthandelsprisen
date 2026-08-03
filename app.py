@@ -68,8 +68,8 @@ st.markdown("""
 .cat-header { font-size: 13px; font-weight: 700; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1.5px solid #E8E6E2; display: flex; align-items: center; gap: 8px; }
 .crit-row { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid #E8E6E2; align-items: flex-start; }
 .crit-score { min-width: 36px; text-align: center; }
-.crit-name { font-size: 12px; font-weight: 600; }
-.crit-beg { font-size: 11px; color: #666; }
+.crit-name { font-size: 14px; font-weight: 600; }
+.crit-beg { font-size: 13px; color: #444; line-height: 1.6; }
 .crit-vekt { font-size: 10px; color: #999; }
 </style>
 """, unsafe_allow_html=True)
@@ -392,16 +392,19 @@ def vis_detaljpanel(butikk, juryvurderinger={}):
             st.markdown(trust_html, unsafe_allow_html=True)
             st.markdown("")
 
-        # Logistikkpartnere
-        if butikk.get("logistikk"):
-            st.markdown("**Logistikkpartnere**")
-            cols = st.columns(len(LOGISTIKK_AKTORER))
-            for j, aktør in enumerate(LOGISTIKK_AKTORER):
-                har = butikk["logistikk"].get(aktør, False)
-                bg = "#E6F4EC" if har else "#F5F4F2"
-                farge = "#1B6B3A" if har else "#D8D6D2"
-                cols[j].markdown(f'<div style="background:{bg};border-radius:6px;padding:6px;text-align:center;font-size:10px;font-weight:600;color:{farge}">{aktør}</div>', unsafe_allow_html=True)
-            st.markdown("")
+        # Logistikkpartnere – vis alltid
+        st.markdown("**Logistikkpartnere**")
+        logi = butikk.get("logistikk") or {}
+        cols = st.columns(len(LOGISTIKK_AKTORER))
+        for j, aktør in enumerate(LOGISTIKK_AKTORER):
+            har = logi.get(aktør, False)
+            bg = "#E6F4EC" if har else "#F5F4F2"
+            farge = "#1B6B3A" if har else "#999"
+            ikon = "✓ " if har else ""
+            cols[j].markdown(f'<div style="background:{bg};border-radius:6px;padding:8px 4px;text-align:center;font-size:11px;font-weight:600;color:{farge}">{ikon}{aktør}</div>', unsafe_allow_html=True)
+        if not any(logi.get(a) for a in LOGISTIKK_AKTORER):
+            st.caption("Ingen logistikkpartnere identifisert – agenten klarte ikke å verifisere dette fra nettstedet.")
+        st.markdown("")
 
         # Kriteriegjennomgang
         if butikk.get("scoring"):
