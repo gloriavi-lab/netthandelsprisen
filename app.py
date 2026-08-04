@@ -30,7 +30,10 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-.stApp { background-color: #EEECEA; }
+.stApp { background-color: #F5F4F2; }
+section[data-testid="stSidebar"] { background-color: #FFFFFF; }
+.stTabs [data-baseweb="tab-panel"] { background-color: white; border-radius: 0 0 8px 8px; padding: 16px; }
+div[data-testid="stExpander"] { background-color: white; border-radius: 8px; }
 .main-header {
     background: #212121; color: white; padding: 16px 28px;
     border-radius: 10px; margin-bottom: 24px;
@@ -63,9 +66,9 @@ st.markdown("""
 .logi-no { background: #F5F4F2; color: #bbb; }
 .crit-row { padding: 16px 0; border-bottom: 1px solid #E8E6E2; display: flex; gap: 16px; align-items: flex-start; }
 .crit-score { min-width: 52px; text-align: center; }
-.crit-name { font-size: 16px; font-weight: 700; color: #1A1A1A; margin-bottom: 6px; }
+.crit-name { font-size: 15px; font-weight: 700; color: #1A1A1A; margin-bottom: 6px; }
 .crit-beg { font-size: 14px; color: #333; line-height: 1.7; }
-.crit-vekt { font-size: 12px; color: #999; margin-top: 4px; font-style: italic; }
+.crit-vekt { font-size: 12px; color: #aaa; margin-top: 4px; font-style: italic; letter-spacing: 0.3px; }
 .jury-box { background: #F8F7F5; border-radius: 10px; padding: 16px 20px; margin: 16px 0; border-left: 4px solid #C8102E; }
 .section-title { font-size: 11px; font-weight: 700; color: #999; text-transform: uppercase; letter-spacing: 0.6px; margin: 20px 0 10px 0; padding-bottom: 6px; border-bottom: 1.5px solid #E8E6E2; }
 .warning-box { background: #FEF3E2; border-left: 3px solid #E8A020; border-radius: 0 8px 8px 0; padding: 10px 14px; font-size: 13px; color: #7A4800; margin: 10px 0; }
@@ -454,10 +457,10 @@ def vis_detaljpanel(butikk, juryvurderinger={}):
                     </div>
                     """, unsafe_allow_html=True)
 
-        vis_tab(tab1, *kat_info[0][1:])
-        vis_tab(tab2, *kat_info[1][1:])
-        vis_tab(tab3, *kat_info[2][1:])
-        vis_tab(tab4, *kat_info[3][1:])
+        vis_tab(tab1, kat_info[0][1], kat_info[0][2], kat_info[0][3], kat_info[0][4])
+        vis_tab(tab2, kat_info[1][1], kat_info[1][2], kat_info[1][3], kat_info[1][4])
+        vis_tab(tab3, kat_info[2][1], kat_info[2][2], kat_info[2][3], kat_info[2][4])
+        vis_tab(tab4, kat_info[3][1], kat_info[3][2], kat_info[3][3], kat_info[3][4])
 
     if st.button("✕ Lukk", key=f"lukk_{navn}"):
         st.session_state.valgt_butikk = None
@@ -814,12 +817,6 @@ elif side == "ℹ️ Om verktøyet":
     **Kundeklubb:** 2=Ingen · 3=Kun inngangsrabatt · 4=Poeng/rabatter · 5=Full lojalitetspakke
 
     **NB:** Stor-klassen bedømmes strengere enn Medium og Liten.
-
-    ### Bruksflyt
-    1. Kjør `colab_agent.py` i Google Colab med Excel-listen
-    2. Last ned `resultater.json` fra Colab
-    3. Last opp `resultater.json` i sidepanelet til venstre
-    4. Bruk Screening, Topp 100 og Finale-fanene
 
     ### Versjon 6.0 · August 2026 · Posten Bring
     """)
