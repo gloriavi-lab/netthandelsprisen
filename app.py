@@ -27,7 +27,7 @@ div[data-testid="stExpander"] { background-color: white; border-radius: 8px; }
 .logo-badge { background: #C8102E; color: white; padding: 5px 12px; border-radius: 4px; font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; }
 .detail-panel { background: white; border-radius: 12px; padding: 28px 32px; margin-bottom: 20px; border-top: 4px solid #C8102E; box-shadow: 0 2px 12px rgba(0,0,0,0.10); border: 1px solid #E8E6E2; }
 .jury-box { background: #F8F7F5; border-radius: 10px; padding: 16px 20px; margin: 16px 0; border-left: 4px solid #C8102E; }
-.section-title { font-size: 11px; font-weight: 700; color: #999; text-transform: uppercase; letter-spacing: 0.6px; margin: 20px 0 10px 0; padding-bottom: 6px; border-bottom: 1.5px solid #E8E6E2; }
+.section-title { font-size: 13px; font-weight: 700; color: #555; text-transform: uppercase; letter-spacing: 0.6px; margin: 24px 0 12px 0; padding-bottom: 8px; border-bottom: 2px solid #E8E6E2; }
 .warning-box { background: #FEF3E2; border-left: 3px solid #E8A020; border-radius: 0 8px 8px 0; padding: 10px 14px; font-size: 13px; color: #7A4800; margin: 10px 0; }
 .tech-ok { background: #E6F4EC; color: #1B6B3A; padding: 6px 12px; border-radius: 8px; font-size: 13px; font-weight: 500; display: inline-block; margin: 3px; }
 .tech-warn { background: #FEF3E2; color: #7A4800; padding: 6px 12px; border-radius: 8px; font-size: 13px; font-weight: 500; display: inline-block; margin: 3px; }
@@ -128,18 +128,18 @@ def score_html(s):
 def klasse_html(k):
     m = {"Liten": ("#0D4A8A","#E6F0FA"), "Medium": ("#7A4800","#FEF3E2"), "Stor": ("#5B2D8E","#F0E8FA")}
     c, bg = m.get(k, ("#666","#eee"))
-    return f'<span style="background:{bg};color:{c};padding:3px 10px;border-radius:20px;font-size:12px;font-weight:700">{k}</span>'
+    return f'<span style="background:{bg};color:{c};padding:5px 12px;border-radius:20px;font-size:13px;font-weight:700">{k}</span>'
 
 def status_html(s, enk=False):
-    if enk: return '<span style="background:#FDECEA;color:#C8102E;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:700">⛔ ENK</span>'
-    if s == "inn": return '<span style="background:#E6F4EC;color:#1B6B3A;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:700">✓ Videre</span>'
-    if s == "ut": return '<span style="background:#FDECEA;color:#C8102E;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:700">✕ Ut</span>'
-    return '<span style="background:#FEF3E2;color:#7A4800;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:700">? Sjekk</span>'
+    if enk: return '<span style="background:#FDECEA;color:#C8102E;padding:5px 12px;border-radius:20px;font-size:13px;font-weight:700">⛔ ENK</span>'
+    if s == "inn": return '<span style="background:#E6F4EC;color:#1B6B3A;padding:5px 12px;border-radius:20px;font-size:13px;font-weight:700">✓ Videre</span>'
+    if s == "ut": return '<span style="background:#FDECEA;color:#C8102E;padding:5px 12px;border-radius:20px;font-size:13px;font-weight:700">✕ Ut</span>'
+    return '<span style="background:#FEF3E2;color:#7A4800;padding:5px 12px;border-radius:20px;font-size:13px;font-weight:700">? Sjekk</span>'
 
 with st.sidebar:
     st.markdown("### 🏆 Netthandelsprisen")
     st.markdown("---")
-    side = st.radio("Naviger", ["📋 Screening", "⭐ Topp 100", "🏆 Finale", "📦 Logistikk", "ℹ️ Om verktøyet"], label_visibility="collapsed")
+    side = st.radio("Naviger", ["📋 Screening", "⭐ Topp 100", "🏆 Finale", "📦 Logistikk", "ℹ️ Informasjon"], label_visibility="collapsed")
     st.markdown("---")
     api_key = st.secrets.get("ANTHROPIC_API_KEY", "")
     if api_key:
@@ -203,7 +203,7 @@ def vis_detaljpanel(butikk, juryvurderinger={}):
     if ap and ap.get("palagt") and not ap.get("rapport_funnet"):
         st.markdown(f'<div class="warning-box">⚠️ Åpenhetsloven: Rapporteringspliktig men ingen rapport funnet.</div>', unsafe_allow_html=True)
 
-    st.markdown('<div class="jury-box"><div style="font-size:11px;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px">🎯 Juryverktøy</div>', unsafe_allow_html=True)
+    st.markdown('<div class="jury-box"><div style="font-size:14px;font-weight:700;color:#333;margin-bottom:14px">🎯 Juryverktøy</div>', unsafe_allow_html=True)
     jcol1, jcol2, jcol3 = st.columns([2, 2, 3])
     with jcol1:
         jury_score = st.select_slider("Juryscore", options=[1,2,3,4,5], value=max(1, min(5, int(lagret.get("Juryscore", butikk.get("juryScore", 3)) or 3))), format_func=lambda x: "⭐"*x, key=f"js_{navn}")
@@ -537,18 +537,38 @@ elif side == "📦 Logistikk":
         st.metric("Bruker Posten/Bring", pb)
         st.metric("Bruker IKKE Posten/Bring", len(med)-pb)
 
-elif side == "ℹ️ Om verktøyet":
-    st.header("ℹ️ Om Netthandelsprisen – Jurysystem")
+elif side == "ℹ️ Informasjon":
+    st.header("ℹ️ Informasjon om verktøyet")
     st.markdown("""
-    ### Scoringsmodell
+    ### Klassedefinisjon
+    | Klasse | Omsetning |
+    |---|---|
+    | **Liten** | Under 50 mill kr |
+    | **Medium** | 50–250 mill kr |
+    | **Stor** | Over 250 mill kr |
+
+    ### Scoringsmodell – 4 kategorier, 25% vekt hver
     | Kategori | Vekt | Kriterier |
     |---|---|---|
-    | Første inntrykk | 25% | Startside, bilder/film, produktinfo, søk |
+    | Første inntrykk | 25% | Startside (25%), Bilder/film (25%), Produktinfo (25%), Søk (25%) |
     | Info, kundeservice og bærekraft | 25% | KLR 35%, Kundeservice 35%, Bærekraft 30% |
     | Kassen, mersalg og inspirasjon | 25% | Kassen 50%, Mersalg 25%, Inspirasjon 25% |
-    | Markedsføring og kundedialog | 25% | SoMe 40%, Kundeklubb 30%, Nyhetsbrev 30% |
+    | Markedsføring og kundedialog | 25% | SoMe 40%, Kundeklubb 30% (dynamisk), Nyhetsbrev 30% |
 
-    **Kundeklubb:** 2=Ingen · 3=Kun inngangsrabatt · 4=Poeng/rabatter · 5=Full lojalitetspakke
+    **Kjøpsvilkår, levering og retur (35% av IKS):**
+    Kjøpsvilkår 20% · Levering 40% · Retur 40%
+
+    **Kassen (50% av Kassen/Mersalg):**
+    Innlogging 20% · Leveringsvalg 30% · Leveringspris 20% · Leveringstid 15% · Betaling 15%
+
+    **Kundeklubb-scoring:**
+    2 = Ingen kundeklubb · 3 = Kun inngangsrabatt · 4 = Poeng/rabatter · 5 = Full lojalitetspakke
+
+    **NB:** Stor-klassen bedømmes strengere enn Medium og Liten.
+
+    ### KO-kriterier
+    - ENK (Enkeltmannsforetak) – filtreres automatisk ut
+    - Ingen URL funnet – kan ikke identifiseres
 
     ### Versjon 7.0 · August 2026 · Posten Bring
     """)
