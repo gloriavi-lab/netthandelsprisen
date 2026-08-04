@@ -30,7 +30,7 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-.stApp { background-color: #F5F4F2; }
+.stApp { background-color: #EEECEA; }
 .main-header {
     background: #212121; color: white; padding: 16px 28px;
     border-radius: 10px; margin-bottom: 24px;
@@ -44,7 +44,7 @@ st.markdown("""
 .detail-panel {
     background: white; border-radius: 12px; padding: 28px 32px;
     margin-bottom: 20px; border-top: 4px solid #C8102E;
-    box-shadow: 0 2px 16px rgba(0,0,0,0.08);
+    box-shadow: 0 2px 12px rgba(0,0,0,0.10);
 }
 .score-card {
     background: #F5F4F2; border-radius: 8px; padding: 14px 18px;
@@ -61,12 +61,12 @@ st.markdown("""
 .logi-box { border-radius: 8px; padding: 10px 8px; text-align: center; font-size: 12px; font-weight: 600; }
 .logi-yes { background: #E6F4EC; color: #1B6B3A; }
 .logi-no { background: #F5F4F2; color: #bbb; }
-.crit-row { padding: 12px 0; border-bottom: 1px solid #E8E6E2; display: flex; gap: 14px; align-items: flex-start; }
-.crit-score { min-width: 40px; text-align: center; font-size: 16px; font-weight: 700; }
-.crit-name { font-size: 14px; font-weight: 600; color: #1A1A1A; margin-bottom: 4px; }
-.crit-beg { font-size: 13px; color: #444; line-height: 1.6; }
-.crit-vekt { font-size: 12px; color: #999; margin-top: 3px; }
-.jury-box { background: #F5F4F2; border-radius: 10px; padding: 16px 20px; margin: 16px 0; border-left: 4px solid #C8102E; }
+.crit-row { padding: 16px 0; border-bottom: 1px solid #E8E6E2; display: flex; gap: 16px; align-items: flex-start; }
+.crit-score { min-width: 52px; text-align: center; }
+.crit-name { font-size: 16px; font-weight: 700; color: #1A1A1A; margin-bottom: 6px; }
+.crit-beg { font-size: 14px; color: #333; line-height: 1.7; }
+.crit-vekt { font-size: 12px; color: #999; margin-top: 4px; font-style: italic; }
+.jury-box { background: #F8F7F5; border-radius: 10px; padding: 16px 20px; margin: 16px 0; border-left: 4px solid #C8102E; }
 .section-title { font-size: 11px; font-weight: 700; color: #999; text-transform: uppercase; letter-spacing: 0.6px; margin: 20px 0 10px 0; padding-bottom: 6px; border-bottom: 1.5px solid #E8E6E2; }
 .warning-box { background: #FEF3E2; border-left: 3px solid #E8A020; border-radius: 0 8px 8px 0; padding: 10px 14px; font-size: 13px; color: #7A4800; margin: 10px 0; }
 </style>
@@ -319,7 +319,7 @@ def vis_detaljpanel(butikk, juryvurderinger={}):
     st.markdown('</div>', unsafe_allow_html=True)
 
     # Screeningresultat
-    st.markdown(f'<div style="background:#F5F4F2;border-radius:8px;padding:12px 16px;border-left:3px solid #C8102E;font-size:13px;color:#666;margin:12px 0"><strong style="font-size:11px;color:#999;text-transform:uppercase;letter-spacing:0.5px">Screeningresultat</strong><br/>{butikk.get("screeningBegrunnelse","")}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div style="background:#F5F4F2;border-radius:8px;padding:12px 16px;border-left:3px solid #C8102E;font-size:13px;color:#666;margin:12px 0;background:white"><strong style="font-size:11px;color:#999;text-transform:uppercase;letter-spacing:0.5px">Screeningresultat</strong><br/>{butikk.get("screeningBegrunnelse","")}</div>', unsafe_allow_html=True)
 
     if butikk.get("kommentar"):
         st.markdown(f'<div style="background:white;border:1.5px solid #E8E6E2;border-radius:8px;padding:14px 18px;font-size:14px;color:#333;line-height:1.7;margin:12px 0">{butikk["kommentar"]}</div>', unsafe_allow_html=True)
@@ -345,9 +345,9 @@ def vis_detaljpanel(butikk, juryvurderinger={}):
                 d = butikk["kat3Detalj"]
                 sub = f'<div style="font-size:11px;color:#999;margin-top:4px">K:{d.get("kassen","–")} M:{d.get("mersalg","–")} I:{d.get("inspirasjon","–")}</div>'
             scol[i].markdown(
-                f'<div style="background:{bg if label!="Total" else "#F5F4F2"};border-radius:10px;padding:14px;text-align:center;border-top:3px solid {farge}">'
-                f'<div style="font-size:11px;color:#999;font-weight:600;text-transform:uppercase;letter-spacing:0.4px">{label}</div>'
-                f'<div style="font-size:28px;font-weight:700;color:{c if label!="Total" else "#212121"};margin-top:4px">{val if val is not None else "–"}</div>'
+                f'<div style="background:white;border-radius:10px;padding:16px 12px;text-align:center;border-top:4px solid {farge};box-shadow:0 2px 6px rgba(0,0,0,0.08);min-height:110px">'
+                f'<div style="font-size:11px;color:#999;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">{label}</div>'
+                f'<div style="font-size:32px;font-weight:700;color:{c if label!="Total" else "#212121"};line-height:1">{val if val is not None else "–"}</div>'
                 f'{sub}</div>',
                 unsafe_allow_html=True
             )
@@ -360,8 +360,16 @@ def vis_detaljpanel(butikk, juryvurderinger={}):
             cls = "tech-ok" if v == "ok" else "tech-warn" if v == "warn" else "tech-bad"
             ikon = "✓" if v == "ok" else "⚠" if v == "warn" else "✕"
             return f'<span class="{cls}">{ikon} {l}</span>'
-        tp = tech.get("trustpilot", "Ikke funnet")
-        tp_html = f'<span class="tech-ok">⭐ {tp}</span>' if tp and tp != "Ikke funnet" else '<span class="tech-warn">⭐ Trustpilot ikke funnet</span>'
+        # Trustpilot kan være dict eller streng
+        tp_raw = tech.get("trustpilot", "Ikke funnet")
+        if isinstance(tp_raw, dict):
+            tp_score = tp_raw.get("score","")
+            tp_beg = tp_raw.get("begrunnelse","")
+            tp_html = f'<span class="tech-ok">⭐ Trustpilot {tp_score}/5 – {tp_beg[:60]}</span>'
+        elif tp_raw and tp_raw != "Ikke funnet":
+            tp_html = f'<span class="tech-ok">⭐ {tp_raw}</span>'
+        else:
+            tp_html = '<span class="tech-warn">⭐ Trustpilot ikke funnet</span>'
         st.markdown(
             tbadge(tech.get("mobil","warn"), "Mobilvennlig") + " " +
             tbadge(tech.get("ssl","warn"), "SSL") + " " +
@@ -377,13 +385,21 @@ def vis_detaljpanel(butikk, juryvurderinger={}):
         st.markdown('<div class="section-title">Tillit og trygghet</div>', unsafe_allow_html=True)
         st.markdown(" ".join(f'<span class="trust-badge">{t}</span>' for t in trust), unsafe_allow_html=True)
 
-    # Logistikkpartnere
+    # Logistikkpartnere - sjekk både butikk["logistikk"] og scoring
     st.markdown('<div class="section-title">Logistikkpartnere</div>', unsafe_allow_html=True)
     logi = butikk.get("logistikk") or {}
+    # Fallback: sjekk om logistikk ligger i scoring-raw (eldre format)
+    if not logi and butikk.get("scoring"):
+        for kat in butikk["scoring"].values():
+            if isinstance(kat, list):
+                for item in kat:
+                    if isinstance(item, dict) and "logistikk" in item:
+                        logi = item["logistikk"]
+                        break
     lcols = st.columns(len(LOGISTIKK_AKTORER))
     noen_funnet = False
     for j, aktør in enumerate(LOGISTIKK_AKTORER):
-        har = logi.get(aktør, False)
+        har = bool(logi.get(aktør, False))
         if har:
             noen_funnet = True
         css = "logi-yes" if har else "logi-no"
@@ -393,25 +409,42 @@ def vis_detaljpanel(butikk, juryvurderinger={}):
             unsafe_allow_html=True
         )
     if not noen_funnet:
-        st.caption("Ingen logistikkpartnere identifisert fra nettstedet.")
+        st.caption("ℹ️ Agenten klarte ikke å verifisere logistikkpartnere fra nettstedet denne kjøringen.")
 
     # Kriteriegjennomgang
     if butikk.get("scoring"):
         st.markdown('<div class="section-title">Kriteriegjennomgang</div>', unsafe_allow_html=True)
         scoring = butikk["scoring"]
-        tab1, tab2, tab3, tab4 = st.tabs([
-            "🔍 Første inntrykk", "📋 Info/KS/Bærekraft", "🛒 Kassen/Mersalg", "📣 Markedsføring"
-        ])
 
-        def vis_tab(tab, kriterier):
+        kat_info = [
+            ("🔍 Første inntrykk", scoring.get("inntrykk", []), butikk.get("inntrykk"), "#C8102E", "25%"),
+            ("📋 Info/KS/Bærekraft", scoring.get("iks", []), butikk.get("iks"), "#E87D3E", "25%"),
+            ("🛒 Kassen/Mersalg", scoring.get("kassen", []), butikk.get("kat3"), "#0D4A8A", "25%"),
+            ("📣 Markedsføring", scoring.get("markedsforing", []), butikk.get("markedsforing"), "#1B6B3A", "25%"),
+        ]
+
+        tab1, tab2, tab3, tab4 = st.tabs([k[0] for k in kat_info])
+
+        def vis_tab(tab, kriterier, kat_navn, kat_score, farge, vekt):
             with tab:
+                if kat_score is not None:
+                    c, bg = score_farge(kat_score)
+                    st.markdown(
+                        f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;padding-bottom:10px;border-bottom:2px solid {farge}">'
+                        f'<span style="width:10px;height:10px;border-radius:50%;background:{farge};display:inline-block"></span>'
+                        f'<span style="font-size:15px;font-weight:700;color:#1A1A1A">{kat_navn}</span>'
+                        f'<span style="font-size:13px;color:#999">Vekt {vekt}</span>'
+                        f'<span style="background:{bg};color:{c};padding:3px 10px;border-radius:5px;font-weight:700;font-size:15px;margin-left:4px">{kat_score}</span>'
+                        f'</div>',
+                        unsafe_allow_html=True
+                    )
                 for k in kriterier:
                     score = k.get("score", 0)
                     c, bg = score_farge(score)
                     st.markdown(f"""
                     <div class="crit-row">
                         <div class="crit-score">
-                            <span style="background:{bg};color:{c};padding:4px 10px;border-radius:5px;font-weight:700;font-size:15px">{score}</span>
+                            <span style="background:{bg};color:{c};padding:8px 12px;border-radius:8px;font-weight:700;font-size:20px;display:inline-block;min-width:44px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,0.1)">{score}</span>
                         </div>
                         <div style="flex:1">
                             <div class="crit-name">{k.get("navn","")}</div>
@@ -421,10 +454,10 @@ def vis_detaljpanel(butikk, juryvurderinger={}):
                     </div>
                     """, unsafe_allow_html=True)
 
-        vis_tab(tab1, scoring.get("inntrykk", []))
-        vis_tab(tab2, scoring.get("iks", []))
-        vis_tab(tab3, scoring.get("kassen", []))
-        vis_tab(tab4, scoring.get("markedsforing", []))
+        vis_tab(tab1, *kat_info[0][1:])
+        vis_tab(tab2, *kat_info[1][1:])
+        vis_tab(tab3, *kat_info[2][1:])
+        vis_tab(tab4, *kat_info[3][1:])
 
     if st.button("✕ Lukk", key=f"lukk_{navn}"):
         st.session_state.valgt_butikk = None
@@ -532,7 +565,7 @@ if side == "📋 Screening":
             if st.button("Vis detaljer", key=f"det_{i}_{navn}", use_container_width=True):
                 st.session_state.valgt_butikk = navn
                 st.rerun()
-        st.markdown('<hr style="margin:4px 0;border-color:#E8E6E2;opacity:0.5">', unsafe_allow_html=True)
+        st.markdown('<hr style="margin:6px 0;border-color:#D8D6D2;opacity:0.4">', unsafe_allow_html=True)
 
     # Eksporter
     if vis:
