@@ -19,13 +19,13 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-.stApp { background-color: #F5F4F2; }
+.stApp { background-color: #FFFFFF; }
 section[data-testid="stSidebar"] > div { background-color: #FFFFFF !important; border-right: 1px solid #E8E6E2; }
 .stTabs [data-baseweb="tab-panel"] { background-color: white; padding: 16px; border-radius: 0 0 8px 8px; }
 div[data-testid="stExpander"] { background-color: white; border-radius: 8px; }
 .main-header { background: #212121; color: white; padding: 16px 28px; border-radius: 10px; margin-bottom: 24px; display: flex; align-items: center; gap: 16px; }
 .logo-badge { background: #C8102E; color: white; padding: 5px 12px; border-radius: 4px; font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; }
-.detail-panel { background: white; border-radius: 12px; padding: 28px 32px; margin-bottom: 20px; border-top: 4px solid #C8102E; box-shadow: 0 2px 12px rgba(0,0,0,0.10); }
+.detail-panel { background: white; border-radius: 12px; padding: 28px 32px; margin-bottom: 20px; border-top: 4px solid #C8102E; box-shadow: 0 2px 12px rgba(0,0,0,0.10); border: 1px solid #E8E6E2; }
 .jury-box { background: #F8F7F5; border-radius: 10px; padding: 16px 20px; margin: 16px 0; border-left: 4px solid #C8102E; }
 .section-title { font-size: 11px; font-weight: 700; color: #999; text-transform: uppercase; letter-spacing: 0.6px; margin: 20px 0 10px 0; padding-bottom: 6px; border-bottom: 1.5px solid #E8E6E2; }
 .warning-box { background: #FEF3E2; border-left: 3px solid #E8A020; border-radius: 0 8px 8px 0; padding: 10px 14px; font-size: 13px; color: #7A4800; margin: 10px 0; }
