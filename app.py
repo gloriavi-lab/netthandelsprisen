@@ -1,3 +1,4 @@
+# VERSJON 6.2 - 04.08.2026
 """
 NETTHANDELSPRISEN – POSTEN BRING
 Streamlit-app v6 – komplett og fikset versjon
