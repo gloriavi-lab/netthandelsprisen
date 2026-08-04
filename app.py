@@ -19,8 +19,8 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-.stApp { background-color: #E8E6E2; }
-section[data-testid="stSidebar"] > div { background-color: #FFFFFF !important; }
+.stApp { background-color: #F5F4F2; }
+section[data-testid="stSidebar"] > div { background-color: #FFFFFF !important; border-right: 1px solid #E8E6E2; }
 .stTabs [data-baseweb="tab-panel"] { background-color: white; padding: 16px; border-radius: 0 0 8px 8px; }
 div[data-testid="stExpander"] { background-color: white; border-radius: 8px; }
 .main-header { background: #212121; color: white; padding: 16px 28px; border-radius: 10px; margin-bottom: 24px; display: flex; align-items: center; gap: 16px; }
@@ -330,7 +330,7 @@ def vis_detaljpanel(butikk, juryvurderinger={}):
         vis_kriterier(tab3, scoring.get("kassen", []), butikk.get("kat3"), "#0D4A8A")
         vis_kriterier(tab4, scoring.get("markedsforing", []), butikk.get("markedsforing"), "#1B6B3A")
 
-    if st.button("✕ Lukk", key=f"lukk_{navn}"):
+    if st.button("✕ Lukk detaljer", key=f"lukk_{navn}"):
         st.session_state.valgt_butikk = None
         st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
@@ -391,7 +391,7 @@ if side == "📋 Screening":
         navn = s.get("name","")
         url = s.get("url","")
         with tcol[0]:
-            st.markdown(f'<div style="font-weight:600;font-size:14px">{navn}</div><div style="font-size:12px;color:#C8102E">{url.replace("https://","").replace("http://","")[:35] if url else ""}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="font-weight:700;font-size:16px">{navn}</div><div style="font-size:13px;color:#C8102E">{url.replace("https://","").replace("http://","")[:35] if url else ""}</div>', unsafe_allow_html=True)
         with tcol[1]:
             st.markdown(f'<span style="background:#F0E8FA;color:#5B2D8E;padding:3px 8px;border-radius:4px;font-size:11px;font-weight:600">{s.get("bransje","–")}</span>', unsafe_allow_html=True)
         with tcol[2]:
@@ -412,8 +412,12 @@ if side == "📋 Screening":
             else:
                 st.markdown('<span style="color:#ccc;font-size:11px">–</span>', unsafe_allow_html=True)
         with tcol[7]:
-            if st.button("Vis detaljer", key=f"det_{i}_{navn}", use_container_width=True):
-                st.session_state.valgt_butikk = navn
+            label = "▼ Åpnet" if st.session_state.valgt_butikk == navn else "Vis detaljer"
+            if st.button(label, key=f"det_{i}_{navn}", use_container_width=True):
+                if st.session_state.valgt_butikk == navn:
+                    st.session_state.valgt_butikk = None
+                else:
+                    st.session_state.valgt_butikk = navn
                 st.rerun()
         st.markdown('<hr style="margin:4px 0;border-color:#D8D6D2;opacity:0.4">', unsafe_allow_html=True)
     if vis:
