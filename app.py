@@ -528,16 +528,85 @@ elif side == "📦 Logistikk":
         st.stop()
     r = st.session_state.resultater
     med = [v for v in r.values() if v.get("status")=="inn"]
-    counts = {a: sum(1 for s in med if bool((s.get("logistikk") or {}).get(a)) and (s.get("logistikk") or {}).get(a) not in (False,"false",0,None,"")) for a in LOGISTIKK_AKTORER}
+    er_aktiv = lambda v: bool(v) and v not in (False, "false", 0, None, "")
+    counts = {a: sum(1 for s in med if er_aktiv((s.get("logistikk") or {}).get(a))) for a in LOGISTIKK_AKTORER}
+    maks = max(counts.values()) if counts and max(counts.values()) > 0 else 1
+
+    st.markdown('<div class="warning-box">Kartlegging av logistikkpartnere – forretningsintelligens for Posten Bring, ikke scoringskriterium.</div>', unsafe_allow_html=True)
+
+    farger = {
+        "Posten/Bring": "#C8102E", "PostNord": "#0D4A8A", "Helthjem": "#1B6B3A",
+        "Instabox": "#5B2D8E", "Porterbuddy": "#E8A020", "DHL": "#FFCC00",
+        "Budbee": "#7A4800", "UPS/FedEx": "#8B5A2B", "Egne biler": "#999999",
+    }
+    ikoner = {
+        "Posten/Bring": "✅", "PostNord": "📦", "Helthjem": "🚚", "Instabox": "📱",
+        "Porterbuddy": "🛵", "DHL": "✈️", "Budbee": "🚐", "UPS/FedEx": "📮", "Egne biler": "🚗",
+    }
+
     c1, c2 = st.columns(2)
     with c1:
-        st.markdown("**Logistikkpartnere**")
-        df_logi = pd.DataFrame([{"Partner": k, "Antall": v} for k, v in sorted(counts.items(), key=lambda x: x[1], reverse=True)])
-        st.bar_chart(df_logi.set_index("Partner"))
+        st.markdown('<div class="detail-panel" style="padding:20px 24px">', unsafe_allow_html=True)
+        st.markdown('<div style="font-weight:700;font-size:14px;margin-bottom:14px">Logistikkpartnere blant scorede butikker</div>', unsafe_allow_html=True)
+        rows = ""
+        for a in sorted(counts, key=lambda x: counts[x], reverse=True):
+            v = counts[a]
+            pct = int(100 * v / maks)
+            rows += (
+                f'<div style="display:flex;align-items:center;gap:10px;margin:9px 0">'
+                f'<div style="width:100px;font-size:13px;color:#333;flex-shrink:0">{a}</div>'
+                f'<div style="flex:1;background:#F0EFEC;border-radius:6px;height:9px;overflow:hidden">'
+                f'<div style="width:{pct}%;background:{farger.get(a,"#999")};height:100%;border-radius:6px"></div>'
+                f'</div>'
+                f'<div style="width:20px;text-align:right;font-weight:700;font-size:13px">{v}</div>'
+                f'</div>'
+            )
+        st.markdown(rows, unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
     with c2:
+        st.markdown('<div class="detail-panel" style="padding:20px 24px">', unsafe_allow_html=True)
+        st.markdown('<div style="font-weight:700;font-size:14px;margin-bottom:12px">Status Posten/Bring</div>', unsafe_allow_html=True)
+        topp = [a for a in ["Posten/Bring"] + sorted([a for a in LOGISTIKK_AKTORER if a != "Posten/Bring" and counts.get(a,0) > 0], key=lambda x: counts[x], reverse=True)]
+        status_rows = ""
+        for a in topp:
+            ikon = ikoner.get(a, "•")
+            farge = "#C8102E" if a == "Posten/Bring" else "#333"
+            status_rows += f'<div style="padding:5px 0;font-size:14px;color:#333">{ikon} {a}: <strong style="color:{farge}">{counts.get(a,0)}</strong></div>'
+        st.markdown(status_rows, unsafe_allow_html=True)
         pb = counts.get("Posten/Bring", 0)
-        st.metric("Bruker Posten/Bring", pb)
-        st.metric("Bruker IKKE Posten/Bring", len(med)-pb)
+        ikke_pb = len(med) - pb
+        st.markdown(
+            f'<hr style="border-color:#eee;margin:14px 0"><div style="font-size:13px;color:#666">'
+            f'Salgspotensial: <strong style="color:#C8102E">{ikke_pb} bruker ikke Posten/Bring</strong></div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+    st.markdown('<div class="detail-panel" style="padding:20px 24px">', unsafe_allow_html=True)
+    st.markdown('<div style="font-weight:700;font-size:14px;margin-bottom:12px">Salgsmuligheter – bruker ikke Posten/Bring</div>', unsafe_allow_html=True)
+    ikke_pb_butikker = [s for s in med if not er_aktiv((s.get("logistikk") or {}).get("Posten/Bring"))]
+    if ikke_pb_butikker:
+        hcols = st.columns([2.5, 1.5, 1, 2, 1])
+        for c, h in zip(hcols, ["BUTIKK", "BRANSJE", "KLASSE", "BRUKER NÅ", "SCORE"]):
+            c.markdown(f'<div style="font-size:10px;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:0.5px">{h}</div>', unsafe_allow_html=True)
+        st.markdown('<hr style="margin:6px 0;border-color:#E8E6E2">', unsafe_allow_html=True)
+        for s in sorted(ikke_pb_butikker, key=lambda x: x.get("total") or 0, reverse=True):
+            logi = s.get("logistikk") or {}
+            brukt = [a for a in LOGISTIKK_AKTORER if a != "Posten/Bring" and er_aktiv(logi.get(a))]
+            rcols = st.columns([2.5, 1.5, 1, 2, 1])
+            rcols[0].markdown(f'<div style="font-weight:700;font-size:13px">{s.get("name","")}</div>', unsafe_allow_html=True)
+            rcols[1].markdown(f'<span style="background:#F0E8FA;color:#5B2D8E;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;white-space:nowrap">{s.get("bransje","–")}</span>', unsafe_allow_html=True)
+            if s.get("klasse") and s["klasse"] not in ("-", "Ukjent"):
+                rcols[2].markdown(klasse_html(s["klasse"]), unsafe_allow_html=True)
+            else:
+                rcols[2].markdown("–")
+            rcols[3].markdown(f'<span style="font-size:13px;color:#333">{", ".join(brukt) if brukt else "–"}</span>', unsafe_allow_html=True)
+            rcols[4].markdown(score_html(s.get("total")), unsafe_allow_html=True)
+    else:
+        st.caption("Alle butikker med status «Videre» bruker Posten/Bring.")
+    st.markdown('</div>', unsafe_allow_html=True)
 
 elif side == "ℹ️ Informasjon":
     st.header("ℹ️ Informasjon om verktøyet")
