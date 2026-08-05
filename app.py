@@ -585,6 +585,47 @@ elif side == "📦 Logistikk":
 
     st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
     st.markdown('<div class="detail-panel" style="padding:20px 24px">', unsafe_allow_html=True)
+    hcol_t, hcol_f = st.columns([3, 1])
+    with hcol_t:
+        st.markdown('<div style="font-weight:700;font-size:14px;margin-bottom:12px">Full oversikt – hvem bruker hva</div>', unsafe_allow_html=True)
+    with hcol_f:
+        filter_partner = st.selectbox("Filtrer på partner", ["Alle"] + LOGISTIKK_AKTORER, label_visibility="collapsed")
+    kort = {"Posten/Bring":"P/B", "PostNord":"PN", "Helthjem":"HH", "Instabox":"IB", "Porterbuddy":"PB", "DHL":"DHL", "Budbee":"BB", "UPS/FedEx":"UPS", "Egne biler":"Egne"}
+    oversikt = med if filter_partner == "Alle" else [s for s in med if er_aktiv((s.get("logistikk") or {}).get(filter_partner))]
+    oversikt = sorted(oversikt, key=lambda x: x.get("total") or 0, reverse=True)
+    if oversikt:
+        hcols = st.columns([2.5, 1, 4, 1])
+        for c, h in zip(hcols, ["BUTIKK", "KLASSE", "LOGISTIKKPARTNERE", "SCORE"]):
+            c.markdown(f'<div style="font-size:10px;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:0.5px">{h}</div>', unsafe_allow_html=True)
+        st.markdown('<hr style="margin:6px 0;border-color:#E8E6E2">', unsafe_allow_html=True)
+        for s in oversikt:
+            logi = s.get("logistikk") or {}
+            bruker_pb = er_aktiv(logi.get("Posten/Bring"))
+            badges = ""
+            for a in LOGISTIKK_AKTORER:
+                if er_aktiv(logi.get(a)):
+                    er_pb = a == "Posten/Bring"
+                    bg = "#FDECEA" if er_pb else "#E6F4EC"
+                    fg = "#C8102E" if er_pb else "#1B6B3A"
+                    badges += f'<span style="background:{bg};color:{fg};border-radius:4px;padding:2px 6px;font-size:10px;font-weight:700;white-space:nowrap;margin-right:4px">{kort.get(a,a)}</span>'
+            if not badges:
+                badges = '<span style="color:#ccc;font-size:11px">Ingen identifisert</span>'
+            rcols = st.columns([2.5, 1, 4, 1])
+            navnfarge = "#1A1A1A" if bruker_pb else "#C8102E"
+            merke = " ✅" if bruker_pb else ""
+            rcols[0].markdown(f'<div style="font-weight:700;font-size:13px;color:{navnfarge}">{s.get("name","")}{merke}</div>', unsafe_allow_html=True)
+            if s.get("klasse") and s["klasse"] not in ("-", "Ukjent"):
+                rcols[1].markdown(klasse_html(s["klasse"]), unsafe_allow_html=True)
+            else:
+                rcols[1].markdown("–")
+            rcols[2].markdown(badges, unsafe_allow_html=True)
+            rcols[3].markdown(score_html(s.get("total")), unsafe_allow_html=True)
+    else:
+        st.caption("Ingen butikker matcher filteret.")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+    st.markdown('<div class="detail-panel" style="padding:20px 24px">', unsafe_allow_html=True)
     st.markdown('<div style="font-weight:700;font-size:14px;margin-bottom:12px">Salgsmuligheter – bruker ikke Posten/Bring</div>', unsafe_allow_html=True)
     ikke_pb_butikker = [s for s in med if not er_aktiv((s.get("logistikk") or {}).get("Posten/Bring"))]
     if ikke_pb_butikker:
