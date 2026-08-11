@@ -28,48 +28,44 @@ BRANSJER = [
 ]
 
 # ─────────────────────────────────────────────
-# SCORINGSMODELL – KOMPLETT VEKTING
+# SCORINGSMODELL – OPPDATERT VEKTING (v6)
 # ─────────────────────────────────────────────
 #
 # KATEGORI 1: Første inntrykk (25% av total)
-#   - Startside og navigasjon: 25%
-#   - Bilder og film: 25%
-#   - Produktinformasjon: 25%
+#   - Startside (kun meny/overordnet, IKKE søk): 25%
+#   - Bilder og film (video er bonus, ikke krav): 25%
+#   - Produktinformasjon (IKKE anmeldelser): 25%
 #   - Søkefunksjon: 25%
 #
 # KATEGORI 2: Info, kundeservice og bærekraft (25% av total)
-#   - Kjøpsvilkår, levering og retur: 35%
-#     - Kjøpsvilkår: 20%
-#     - Levering: 40%
+#   - Kjøpsvilkår, levering og retur: 40%
+#     - Kjøpsvilkår: 20% (JA/NEI-portvokter – nei = filtreres helt ut av videre vurdering)
+#     - Levering: 40% (ingen antakelser om kronegrenser)
 #     - Retur: 40%
-#   - Kundeservice: 35%
-#     - Selvbetjent: 50%
-#     - Betjent: 50%
-#   - Bærekraft: 30%
-#     - Strategi: 50%
-#     - Kundeverktøy: 50%
+#   - Kundeservice: 40% (samlet kategori, ikke lenger delt selvbetjent/betjent)
+#   - Bærekraft: 20% (samlet kategori)
 #
 # KATEGORI 3: Kassen, mersalg og inspirasjon (25% av total)
-#   - Kassen: 50%
-#     - Innlogging/identifisering: 20%
-#     - Leveringsvalg og fleksibilitet: 30%
-#     - Leveringspris: 20%
-#     - Leveringstid og presisjon: 15%
-#     - Betalingsalternativer: 15%
+#   - Kassen: 50% (innlogging fjernet – 4 gjenværende kriterier)
+#     - Leveringsvalg og fleksibilitet: 35%
+#     - Leveringspris: 25%
+#     - Leveringstid og presisjon: 20%
+#     - Betalingsalternativer: 20%
 #   - Mersalg: 25%
 #   - Inspirasjon: 25%
 #
 # KATEGORI 4: Markedsføring og kundedialog (25% av total)
-#   - Sosiale medier: 40%
-#   - Kundeklubb: 30% (dynamisk – se logikk)
-#   - Nyhetsbrev: 30%
+#   - Sosiale medier: 100% av kat4-poengsummen
+#   - Kundeklubb: IKKE scoret – kun ja/nei + beskrivelse
+#   - Nyhetsbrev/SMS: IKKE scoret – kun ja/nei + beskrivelse
 #
 # NB: Stor-klassen bedømmes strengere enn Medium og Liten.
+# NB: Mobilvennlighet/mobiloptimalisering er fjernet som eget vurderingspunkt.
 
 IKS_VEKTER = {
-    "kjopsvilkar_levering_retur": 0.35,
-    "kundeservice": 0.35,
-    "baerekraft": 0.30,
+    "kjopsvilkar_levering_retur": 0.40,
+    "kundeservice": 0.40,
+    "baerekraft": 0.20,
 }
 
 KLR_VEKTER = {
@@ -78,12 +74,12 @@ KLR_VEKTER = {
     "retur": 0.40,
 }
 
+# innlogging fjernet – vektet på nytt blant de 4 gjenværende Kassen-kriteriene
 KASSEN_VEKTER = {
-    "innlogging": 0.20,
-    "leveringsvalg": 0.30,
-    "leveringspris": 0.20,
-    "leveringstid": 0.15,
-    "betaling": 0.15,
+    "leveringsvalg": 0.35,
+    "leveringspris": 0.25,
+    "leveringstid": 0.20,
+    "betaling": 0.20,
 }
 
 
@@ -264,7 +260,7 @@ Hvis ikke funnet: url = "" """
             resp = client.messages.create(
                 model="claude-sonnet-4-6",
                 max_tokens=800,
-                tools=[{"type": "web_search_20250305", "name": "web_search"}],
+                tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 4}],
                 messages=[{"role": "user", "content": prompt}]
             )
 
@@ -358,112 +354,154 @@ def bygg_advarsler(brreg: dict, info: dict) -> list:
 # ─────────────────────────────────────────────
 # SCORING – KOMPLETT OPPDATERT MODELL
 # ─────────────────────────────────────────────
-def score_nettbutikk(navn: str, url: str, klasse: str, client) -> dict:
+def score_nettbutikk(navn: str, url: str, klasse: str, client, sidedata: dict = None) -> dict:
     """
     Scorer i to separate kall:
     Kall 1: Første inntrykk + IKS
     Kall 2: Kassen/mersalg/inspirasjon + Markedsføring + Logistikk
+
+    sidedata (valgfritt): faktisk innhentet sidetekst fra en sitekontroll-modul
+    (f.eks. søkeresultat, kjøpsvilkår-tekst, fraktinfo-tekst) – brukes som fasit
+    i prompten i stedet for at Claude må gjette ut fra websøk alene.
     """
     strengere = "NB: Klasse Stor bedømmes strengere og med høyere krav enn Medium og Liten. " if klasse == "Stor" else ""
+
+    sidedata_tekst = ""
+    if sidedata:
+        sidedata_tekst = f"""
+
+FAKTISK INNHENTET SIDEINNHOLD (bruk dette som fasit – ikke gjett hvis det står her):
+{json.dumps(sidedata, ensure_ascii=False, indent=None)[:4000]}
+"""
 
     prompt1 = f"""Vurder nettbutikken "{navn}" på URL: {url}
 Klasse: {klasse}. {strengere}
 Score fra 1-5. KORTE begrunnelser UTEN linjeskift.
+VIKTIG: Ikke gjett eller anta noe som ikke faktisk er observert eller oppgitt. Hvis informasjon mangler,
+si det tydelig i begrunnelsen ("ikke funnet") i stedet for å anta et sannsynlig svar.
+{sidedata_tekst}
 
 KATEGORI 1 – FØRSTE INNTRYKK (25% av total, 4 kriterier à 25%):
 
-startside: Visuelt ryddig? Lett å forstå hva de selger? Identitet og inspirasjon (ikke bare bestselgere)?
-Logisk menystruktur? Filtrering på farge, størrelse, pris, bruksområde (ikke bare nyeste og pris)?
+startside: Vurder KUN menylinjen og det overordnede visuelle inntrykket på startsiden – IKKE søkefunksjonen
+(den vurderes separat). Er menystrukturen logisk? Vises kategorier også som bilder/visuelle snarveier
+(ikke bare tekst i menyen)? Visuelt ryddig? Lett å forstå hva de selger? Identitet og inspirasjon
+(ikke bare bestselgere)?
 
-bilder_film: Produkter i miljø (klær på modell med høyde/størrelse oppgitt, sofa i møblert stue)?
-Bilder fra flere vinkler? Film av produkter der relevant?
+bilder_film: Vurder KUN selve bildebruken på hjemmesiden, og hva som er riktig for akkurat DENNE bransjen
+– IKKE innhold hentet fra sosiale medier. Er bildene profesjonelle og relevante for bransjen (produkter i
+miljø der det passer, flere vinkler der det passer)? Film/video er en BONUS, ikke et krav, og relevansen
+varierer med bransje (f.eks. sminkebruk-video hos en hudpleiebutikk, brette-video ved servise/bestikk) –
+fravær av video skal IKKE trekke ned, kun tilstedeværelse gir pluss.
 
-produktinfo: Materiale og mål oppgitt der relevant? Godt strukturert og lett å forstå?
-Produktanmeldelser fra kjøpere med info om størrelse og bruk?
+produktinfo: Vurder i hvor stor grad selve produktet er beskrevet – materiale, størrelse, mål, vekt,
+bruksområde og lignende relevante detaljer der det passer for produkttypen. IKKE vurder om det finnes
+kjøper-/produktanmeldelser – det er ikke en del av dette kriteriet.
 
-sokefunksjon: Gir korrekt resultat ved søk med to variabler?
-Test: rød kjole, stekepanne 24 cm induksjon, blå genser str medium, kaffemaskin med melkeskummer.
+sokefunksjon: Basert på faktisk gjennomført søk (se sideinnhold over hvis tilgjengelig) – gir søket riktig
+resultat både med ett søkeord (f.eks. "genser") og med to parametre samtidig (f.eks. "rød genser")?
+Hvis faktisk søkeresultat IKKE er tilgjengelig i sideinnholdet under, si eksplisitt i begrunnelsen at dette
+er en antatt vurdering basert på generell informasjon om nettbutikken, og ikke et testet søkeresultat.
 
 KATEGORI 2 – INFO, KUNDESERVICE OG BÆREKRAFT (25% av total):
 
-Kjøpsvilkår, levering og retur (35% av kat2):
-kjopsvilkar: Lovpålagt info om kjøpsvilkår tilgjengelig? (ja=nøytral, nei=MEGET negativt)
-levering: Leveringspris/fri frakt synlig FØR checkout? Klikkbar for mer info? Alle detaljer:
-  alternativer, priser, transportører, leveringstid (inkl plukk+pakk). Brukes frakt som USP?
-retur: Returinfo på startside og produktside? Kostnaden, fremgangsmåte, tilbakebetalingstid, returfrist?
-  Tilbyr de returløsning med etikett? (Nei = dårlig score)
+Kjøpsvilkår, levering og retur (40% av kat2):
+kjopsvilkar: JA/NEI – har nettbutikken kjøpsvilkår tilgjengelig? Dette er lovpålagt. Score 5 hvis ja
+(nøytralt, forventet standard), score 1 hvis nei (MEGET negativt – dette er en portvokter-sjekk, se eget felt
+"har_kjopsvilkar" i JSON-svaret).
 
-Kundeservice (35% av kat2):
-selvbetjent_ks: Oppdatert FAQ? Chatbot uten krav om ordrenummer? (Chatbot med ordrenr-krav gir lav verdi)
-betjent_ks: Tydelig info om kanaler, åpningstider, responstid? Lett å finne?
-  (Skjult kontaktinfo/tvinger via FAQ = trekk. God AI chatbot 24/7 = pluss)
+levering: IKKE gjett. Vurder KUN basert på informasjon nettbutikken faktisk oppgir UTENFOR selve
+checkout-løsningen – dvs. på produktside, i FAQ, i footer, eller på egen fraktinfo-side. Er leveringspris
+oppgitt et sted (ikke i selve kassen)? Brukes "FRI FRAKT" som tydelig USP allerede før kunden legger noe i
+handlekurven? Er det oppgitt cut-off-tid (f.eks. "bestilt før kl. 12 sendes samme dag") – dette er en bonus
+som viser god logistikk-kontroll, IKKE et krav. IKKE ta med "pakketid" som eget punkt – det er ikke relevant.
+IKKE anta noen konkret kronegrense for hva som er "for høyt" eller "for lavt" beløp for fri frakt – vurder
+kun ut fra hva som faktisk står, uten egne antakelser om hva som er rimelig.
 
-Bærekraft (30% av kat2):
-baerekraft_strategi: Bærekraftsrapport eller sertifiseringer? Åpenhetsloven-rapport?
-  (Pålagt over 70 mill omsetning, 35 mill balansesum eller 50 årsverk)
-baerekraft_kunder: Filtrering på bærekraftige produkter? Resalg, panteordninger?
-  GOTS-sertifisering eller andre produktsertifiseringer?
+retur: Undersøk om nettbutikken tilbyr returløsning med FERDIG ADRESSELAPP i pakken, eller om kunden må
+skrive ut adresselappen selv ved retur. God score krever at nettbutikken sørger for adresseetikett til en
+fri eller akseptabel pris (under 100 kr). Hvis kunden selv må ordne alt, eller returkostnaden er høy/uklar,
+skal dette trekke ned.
+
+Kundeservice (40% av kat2) – ÉN samlet kategori (IKKE del i selvbetjent/betjent):
+kundeservice: List opp hvilke kontaktkanaler nettbutikken faktisk tilbyr (telefon, e-post, chat, åpningstider
+osv.) og vurder hvor lett tilgjengelig kundeservice er. Vurder om en eventuell chatbot er AI-drevet eller
+bemannet/vanlig chat, HVIS dette faktisk kan fastslås ut fra tilgjengelig informasjon – hvis det ikke lar
+seg avgjøre med sikkerhet, list heller opp kanalene uten å gjette på AI vs. bemannet.
+
+Bærekraft (20% av kat2) – ÉN samlet kategori:
+baerekraft: Har nettbutikken informasjon om bærekraftsrapporter, klimamål, Svanemerket, Åpenhetsloven,
+sertifiseringer (f.eks. GOTS) eller lignende? Nevner de noe om at enkelte produkter er bærekraftige, og
+i så fall hva sier de konkret? Små nettbutikker forventes IKKE nødvendigvis å ha dette – fravær skal ikke
+gi like hardt trekk som for store aktører. Oppsummer i begrunnelsen konkret HVA de eventuelt nevner.
 
 Svar KUN med JSON:
-{{"inntrykk": {{"startside": {{"score": 3, "begrunnelse": "setning"}}, "bilder_film": {{"score": 3, "begrunnelse": "setning"}}, "produktinfo": {{"score": 3, "begrunnelse": "setning"}}, "sokefunksjon": {{"score": 3, "begrunnelse": "setning"}}}}, "iks": {{"kjopsvilkar": {{"score": 3, "begrunnelse": "setning"}}, "levering": {{"score": 3, "begrunnelse": "setning"}}, "retur": {{"score": 3, "begrunnelse": "setning"}}, "selvbetjent_ks": {{"score": 3, "begrunnelse": "setning"}}, "betjent_ks": {{"score": 3, "begrunnelse": "setning"}}, "baerekraft_strategi": {{"score": 3, "begrunnelse": "setning"}}, "baerekraft_kunder": {{"score": 3, "begrunnelse": "setning"}}}}}}"""
+{{"inntrykk": {{"startside": {{"score": 3, "begrunnelse": "setning"}}, "bilder_film": {{"score": 3, "begrunnelse": "setning"}}, "produktinfo": {{"score": 3, "begrunnelse": "setning"}}, "sokefunksjon": {{"score": 3, "begrunnelse": "setning"}}}}, "iks": {{"kjopsvilkar": {{"score": 3, "begrunnelse": "setning", "har_kjopsvilkar": true}}, "levering": {{"score": 3, "begrunnelse": "setning"}}, "retur": {{"score": 3, "begrunnelse": "setning"}}, "kundeservice": {{"score": 3, "begrunnelse": "setning", "kanaler": ["telefon", "e-post", "chat"]}}, "baerekraft": {{"score": 3, "begrunnelse": "setning"}}}}}}"""
 
     prompt2 = f"""Vurder nettbutikken "{navn}" på URL: {url}
 Klasse: {klasse}. {strengere}
 Score fra 1-5. KORTE begrunnelser UTEN linjeskift.
+VIKTIG: Ikke gjett eller anta noe som ikke faktisk er observert eller oppgitt. Hvis informasjon mangler,
+si det tydelig i begrunnelsen i stedet for å anta et sannsynlig svar.
+{sidedata_tekst}
 
 KATEGORI 3 – KASSEN, MERSALG OG INSPIRASJON (25% av total):
 Kassen teller 50%, Mersalg 25%, Inspirasjon 25%.
 
-Kassen (50% av kat3) – 5 underkriterier:
-innlogging: Kan kunden identifisere seg med Vipps/Klarna/tilsvarende for enklere utfylling?
-  (Ja = høyere score, må fylle manuelt = lavere)
+Kassen (50% av kat3) – 4 underkriterier. Disse skal IKKE gjettes ut fra generell tekst på nettbutikken –
+vurder KUN basert på faktisk observert checkout-flyt hvis dette er tilgjengelig i sideinnholdet over.
+Hvis ikke, si eksplisitt i begrunnelsen at scoren er en antatt vurdering og IKKE en testet observasjon:
 
-leveringsvalg: Har de minst 2 leveringsalternativer? Nedtrekksmeny for valg av hentested/pakkeboks?
+leveringsvalg: Har de minst 2 leveringsalternativer i kassen? Nedtrekksmeny for valg av hentested/pakkeboks?
   (Nedtrekksmeny = høyere score enn forhåndsvalgt/mange separate valg som krever scrolling)
   Nærhet til kunden viktig – mange utleveringssteder/pakkebokser gir høyere score.
-  Relevante valg: tyngre varer bør ha hjemlevering, lette varer bør ha postkasse/Helthjem.
 
-leveringspris: Hva er billigste leveringspris? Under 99 kr = god score, over 129 kr = trekk
-  (spesielt hvis varene ikke er store/tunge/eksklusivt sortiment)
+leveringspris: Hva er billigste leveringspris faktisk vist i kassen? Under 99 kr = god score, over 129 kr
+  = trekk (spesielt hvis varene ikke er store/tunge/eksklusivt sortiment).
 
-leveringstid: Oppgir de estimert leveringsdato = best. Tidsintervall (1-3 dager) = middels.
-  Ingen info eller kun transporttid = dårlig. Leveringstid = plukk+pakk + transport.
+leveringstid: Oppgir de estimert leveringsdato i kassen = best. Tidsintervall (1-3 dager) = middels.
+  Ingen info eller kun transporttid = dårlig.
 
-betaling: Full score hvis alle vanlige: kredit/debetkort, Vipps, Klarna/etterbetaling/delbetaling.
+betaling: Hvilke betalingsmetoder ble faktisk tilbudt i kassen? Full score hvis alle vanlige:
+  kredit/debetkort, Vipps, Klarna/etterbetaling/delbetaling.
 
 Mersalg (25% av kat3):
-mersalg: Relevante produktanbefalinger på produktside (komplementerende ELLER alternativer)?
-  Tilbud på vei til kassen og i kassen? Er anbefalingene relevante for det kunden ser på?
+mersalg: Sjekk om nettbutikken viser relevante produktanbefalinger BÅDE på produktsiden OG i selve
+  checkout-løsningen (hvis observert). Er anbefalingene relevante for det kunden faktisk ser på/kjøper?
 
 Inspirasjon (25% av kat3):
-inspirasjon: Artikler, oppskrifter med produktlenker, filmer, guider?
-  Gir faglig tillit OG selger mer? (Eks: oppskrifter med kjøkkenutstyr, friluftsliv-filmer med utstyr)
+inspirasjon: Finnes det guider knyttet til produktet – artikler, filmer, oppskrifter eller
+  bruksanvisninger som viser hvordan produktet kan brukes? Gir faglig tillit OG selger mer?
+  (Eks: oppskrifter med kjøkkenutstyr, friluftsliv-filmer med utstyr, bruksguider for klær/utstyr)
 
 KATEGORI 4 – MARKEDSFØRING OG KUNDEDIALOG (25% av total):
-SoMe 40%, Kundeklubb 30% (dynamisk), Nyhetsbrev 30%.
+Kun "some" gir tallscore i denne kategorien (100% av kat4-scoren). Kundeklubb og nyhetsbrev vurderes
+som ja/nei + beskrivelse, IKKE med poengsum (se JSON-format).
 
-some: Hvilke plattformer? Engasjement og dialog med kunder?
-  Autentisk innhold (ikke katalogbilder)? Troverdige influensere?
-  Kjøpslenker? SoMe som kundeservice?
-  IKKE antall følgere – engasjement og autentisitet teller!
+some: Hvilke kanaler/plattformer er nettbutikken faktisk til stede i? Vurder innholdet de faktisk
+  publiserer der (engasjement, autentisitet – IKKE antall følgere). Sjekk om det er mulig å handle
+  direkte via SoMe (f.eks. "Handle her"-knapp på Instagram/TikTok-innlegg/annonser) – oppgi ja/nei/ukjent
+  hvis dette faktisk kan fastslås. IKKE trekk ned for manglende influencer-samarbeid – tilstedeværelse av
+  troverdige influencere er KUN en bonus, aldri et minus ved fravær.
 
-kundeklubb: Score slik:
-  2 = Ingen kundeklubb
-  3 = Kundeklubb men KUN inngangsrabatt ved første kjøp
-  4 = Kundeklubb med poeng, rabatter og lojalitetsfordeler
-  5 = Full lojalitetspakke med poeng, rabatter, fortrinn til salg og egne tilbud
+kundeklubb: Har nettbutikken en kundeklubb? Svar KUN ja eller nei (se "har_kundeklubb" i JSON).
+  Hvis ja: beskriv KORT hva kundeklubben faktisk inneholder – poeng, rabatter, fortrinn til salg osv.
+  IKKE reduser dette til kun "inngangsrabatt ved første kjøp" – beskriv det reelle innholdet.
+  Dette gis IKKE en poengsum, kun beskrivelse.
 
-nyhetsbrev: Har de nyhetsbrev? Rekrutterer aktivt via kjøpsreisen (popup, påmelding i kasse)?
-  SMS + e-post? Aktiv rekruttering = pluss.
+nyhetsbrev: Er det mulig å melde seg på nyhetsbrev og/eller SMS (f.eks. pop-up-vindu, felt i footer)?
+  Svar KUN ja eller nei (se "har_nyhetsbrev" i JSON). Beskriv KORT hva nyhetsbrevet/SMS-varslene dreier
+  seg om hvis det fremgår. Dette gis IKKE en poengsum, kun beskrivelse.
 
 Kartlegg også (ikke score):
 logistikk: Hvilke brukes? {", ".join(LOGISTIKK_AKTORER)}
-tech: Mobiloptimalisert? SSL? Lastetid (ok/warn/bad)? Trustpilot-score?
+tech: SSL? Lastetid (ok/warn/bad)? Trustpilot-score? (IKKE vurder mobilvennlighet/mobiloptimalisering –
+  dette skal ikke lenger testes eller inngå i vurderingen)
 trust: Liste med tillitselementer (garantier, sertifiseringer, kundeomtaler, fysisk adresse synlig osv)
 apenhetsloven: Er rapport funnet for 2024/2025? Er de rapporteringspliktige?
 
 Svar KUN med JSON:
-{{"kommentar": "2-3 setninger om butikken totalt", "kassen": {{"innlogging": {{"score": 3, "begrunnelse": "setning"}}, "leveringsvalg": {{"score": 3, "begrunnelse": "setning"}}, "leveringspris": {{"score": 3, "begrunnelse": "setning"}}, "leveringstid": {{"score": 3, "begrunnelse": "setning"}}, "betaling": {{"score": 3, "begrunnelse": "setning"}}}}, "mersalg": {{"score": 3, "begrunnelse": "setning"}}, "inspirasjon": {{"score": 3, "begrunnelse": "setning"}}, "markedsforing": {{"some": {{"score": 3, "begrunnelse": "setning"}}, "kundeklubb": {{"score": 2, "begrunnelse": "setning", "har_kundeklubb": false}}, "nyhetsbrev": {{"score": 3, "begrunnelse": "setning"}}}}, "logistikk": {{"Posten/Bring": false, "PostNord": false, "Helthjem": false, "Instabox": false, "Porterbuddy": false, "DHL": false, "Budbee": false, "UPS/FedEx": false, "Egne biler": false}}, "tech": {{"mobil": "ok", "ssl": "ok", "lastetid": "ok", "trustpilot": "Ikke funnet"}}, "trust": ["element1", "element2"], "apenhetsloven": {{"palagt": false, "rapport_funnet": false, "kommentar": "setning"}}}}"""
+{{"kommentar": "2-3 setninger om butikken totalt", "kassen": {{"leveringsvalg": {{"score": 3, "begrunnelse": "setning"}}, "leveringspris": {{"score": 3, "begrunnelse": "setning"}}, "leveringstid": {{"score": 3, "begrunnelse": "setning"}}, "betaling": {{"score": 3, "begrunnelse": "setning"}}}}, "mersalg": {{"score": 3, "begrunnelse": "setning"}}, "inspirasjon": {{"score": 3, "begrunnelse": "setning"}}, "markedsforing": {{"some": {{"score": 3, "begrunnelse": "setning", "handle_direkte_i_some": "ja/nei/ukjent"}}, "kundeklubb": {{"har_kundeklubb": false, "beskrivelse": "setning"}}, "nyhetsbrev": {{"har_nyhetsbrev": false, "beskrivelse": "setning"}}}}, "logistikk": {{"Posten/Bring": false, "PostNord": false, "Helthjem": false, "Instabox": false, "Porterbuddy": false, "DHL": false, "Budbee": false, "UPS/FedEx": false, "Egne biler": false}}, "tech": {{"ssl": "ok", "lastetid": "ok", "trustpilot": "Ikke funnet"}}, "trust": ["element1", "element2"], "apenhetsloven": {{"palagt": false, "rapport_funnet": false, "kommentar": "setning"}}}}"""
 
     def kall(prompt, nr):
         for forsok in range(2):
@@ -471,7 +509,7 @@ Svar KUN med JSON:
                 resp = client.messages.create(
                     model="claude-sonnet-4-6",
                     max_tokens=1200,
-                    tools=[{"type": "web_search_20250305", "name": "web_search"}],
+                    tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 4}],
                     messages=[{"role": "user", "content": prompt}]
                 )
                 # Hent tekst fra alle blokker inkludert tool_result
@@ -545,31 +583,24 @@ def beregn_totalscore(scoring: dict) -> dict:
     inn_scores = [v["score"] for v in inntrykk.values() if isinstance(v, dict) and "score" in v]
     inn_snitt = round(sum(inn_scores) / len(inn_scores), 2) if inn_scores else 0
 
-    # 2. IKS
+    # 2. IKS – kjøpsvilkår/levering/retur 40%, kundeservice 40%, bærekraft 20%
     iks = scoring.get("iks", {})
     klr_snitt = (
         iks.get("kjopsvilkar", {}).get("score", 0) * KLR_VEKTER["kjopsvilkar"] +
         iks.get("levering", {}).get("score", 0) * KLR_VEKTER["levering"] +
         iks.get("retur", {}).get("score", 0) * KLR_VEKTER["retur"]
     )
-    ks_snitt = (
-        iks.get("selvbetjent_ks", {}).get("score", 0) * 0.5 +
-        iks.get("betjent_ks", {}).get("score", 0) * 0.5
-    )
-    bk_snitt = (
-        iks.get("baerekraft_strategi", {}).get("score", 0) * 0.5 +
-        iks.get("baerekraft_kunder", {}).get("score", 0) * 0.5
-    )
+    ks_snitt = iks.get("kundeservice", {}).get("score", 0)
+    bk_snitt = iks.get("baerekraft", {}).get("score", 0)
     iks_snitt = round(
         klr_snitt * IKS_VEKTER["kjopsvilkar_levering_retur"] +
         ks_snitt * IKS_VEKTER["kundeservice"] +
         bk_snitt * IKS_VEKTER["baerekraft"], 2
     )
 
-    # 3. Kassen (50%) + Mersalg (25%) + Inspirasjon (25%)
+    # 3. Kassen (50%, 4 underkriterier – innlogging fjernet) + Mersalg (25%) + Inspirasjon (25%)
     kassen = scoring.get("kassen", {})
     kassescore = (
-        kassen.get("innlogging", {}).get("score", 0) * KASSEN_VEKTER["innlogging"] +
         kassen.get("leveringsvalg", {}).get("score", 0) * KASSEN_VEKTER["leveringsvalg"] +
         kassen.get("leveringspris", {}).get("score", 0) * KASSEN_VEKTER["leveringspris"] +
         kassen.get("leveringstid", {}).get("score", 0) * KASSEN_VEKTER["leveringstid"] +
@@ -579,17 +610,12 @@ def beregn_totalscore(scoring: dict) -> dict:
     insp_score = scoring.get("inspirasjon", {}).get("score", 0)
     kat3_snitt = round(kassescore * 0.50 + mersalg_score * 0.25 + insp_score * 0.25, 2)
 
-    # 4. Markedsføring – dynamisk kundeklubb
+    # 4. Markedsføring – KUN "some" gir poengsum. Kundeklubb/nyhetsbrev er ja/nei + beskrivelse (informativt).
     mf = scoring.get("markedsforing", {})
     some_score = mf.get("some", {}).get("score", 0)
-    kk_score = mf.get("kundeklubb", {}).get("score", 0)
-    nb_score = mf.get("nyhetsbrev", {}).get("score", 0)
-    har_kk = mf.get("kundeklubb", {}).get("har_kundeklubb", kk_score > 2)
-
-    if har_kk:
-        mf_snitt = round(some_score * 0.40 + kk_score * 0.30 + nb_score * 0.30, 2)
-    else:
-        mf_snitt = round(some_score * (40/70) + nb_score * (30/70), 2)
+    har_kk = mf.get("kundeklubb", {}).get("har_kundeklubb", False)
+    har_nb = mf.get("nyhetsbrev", {}).get("har_nyhetsbrev", False)
+    mf_snitt = round(some_score, 2)
 
     total = round(inn_snitt * 0.25 + iks_snitt * 0.25 + kat3_snitt * 0.25 + mf_snitt * 0.25, 1)
 
@@ -612,9 +638,8 @@ def beregn_totalscore(scoring: dict) -> dict:
             "markedsforing": round(mf_snitt, 1),
             "mf_detalj": {
                 "some": some_score,
-                "kundeklubb": kk_score,
-                "nyhetsbrev": nb_score,
                 "har_kundeklubb": har_kk,
+                "har_nyhetsbrev": har_nb,
             }
         }
     }
@@ -631,27 +656,24 @@ def bygg_scoring_for_visning(scoring_raw: dict) -> dict:
             {"navn": "Søkefunksjon", "score": scoring_raw.get("inntrykk", {}).get("sokefunksjon", {}).get("score", 0), "begrunnelse": scoring_raw.get("inntrykk", {}).get("sokefunksjon", {}).get("begrunnelse", ""), "vekt": "25%"},
         ],
         "iks": [
-            {"navn": "Kjøpsvilkår (lovkrav)", "score": scoring_raw.get("iks", {}).get("kjopsvilkar", {}).get("score", 0), "begrunnelse": scoring_raw.get("iks", {}).get("kjopsvilkar", {}).get("begrunnelse", ""), "vekt": "KLR 20%"},
+            {"navn": "Kjøpsvilkår (lovkrav)", "score": scoring_raw.get("iks", {}).get("kjopsvilkar", {}).get("score", 0), "begrunnelse": scoring_raw.get("iks", {}).get("kjopsvilkar", {}).get("begrunnelse", ""), "vekt": "KLR 20%", "har_kjopsvilkar": scoring_raw.get("iks", {}).get("kjopsvilkar", {}).get("har_kjopsvilkar")},
             {"navn": "Leveringsinformasjon", "score": scoring_raw.get("iks", {}).get("levering", {}).get("score", 0), "begrunnelse": scoring_raw.get("iks", {}).get("levering", {}).get("begrunnelse", ""), "vekt": "KLR 40%"},
             {"navn": "Returløsning", "score": scoring_raw.get("iks", {}).get("retur", {}).get("score", 0), "begrunnelse": scoring_raw.get("iks", {}).get("retur", {}).get("begrunnelse", ""), "vekt": "KLR 40%"},
-            {"navn": "Selvbetjent kundeservice", "score": scoring_raw.get("iks", {}).get("selvbetjent_ks", {}).get("score", 0), "begrunnelse": scoring_raw.get("iks", {}).get("selvbetjent_ks", {}).get("begrunnelse", ""), "vekt": "KS 50%"},
-            {"navn": "Betjent kundeservice", "score": scoring_raw.get("iks", {}).get("betjent_ks", {}).get("score", 0), "begrunnelse": scoring_raw.get("iks", {}).get("betjent_ks", {}).get("begrunnelse", ""), "vekt": "KS 50%"},
-            {"navn": "Bærekraft – strategi og rapportering", "score": scoring_raw.get("iks", {}).get("baerekraft_strategi", {}).get("score", 0), "begrunnelse": scoring_raw.get("iks", {}).get("baerekraft_strategi", {}).get("begrunnelse", ""), "vekt": "BK 50%"},
-            {"navn": "Bærekraft – kundeverktøy", "score": scoring_raw.get("iks", {}).get("baerekraft_kunder", {}).get("score", 0), "begrunnelse": scoring_raw.get("iks", {}).get("baerekraft_kunder", {}).get("begrunnelse", ""), "vekt": "BK 50%"},
+            {"navn": "Kundeservice", "score": scoring_raw.get("iks", {}).get("kundeservice", {}).get("score", 0), "begrunnelse": scoring_raw.get("iks", {}).get("kundeservice", {}).get("begrunnelse", ""), "vekt": "KS 40%", "kanaler": scoring_raw.get("iks", {}).get("kundeservice", {}).get("kanaler", [])},
+            {"navn": "Bærekraft", "score": scoring_raw.get("iks", {}).get("baerekraft", {}).get("score", 0), "begrunnelse": scoring_raw.get("iks", {}).get("baerekraft", {}).get("begrunnelse", ""), "vekt": "BK 20%"},
         ],
         "kassen": [
-            {"navn": "Innlogging og identifisering", "score": scoring_raw.get("kassen", {}).get("innlogging", {}).get("score", 0), "begrunnelse": scoring_raw.get("kassen", {}).get("innlogging", {}).get("begrunnelse", ""), "vekt": "Kassen 20%"},
-            {"navn": "Leveringsvalg og fleksibilitet", "score": scoring_raw.get("kassen", {}).get("leveringsvalg", {}).get("score", 0), "begrunnelse": scoring_raw.get("kassen", {}).get("leveringsvalg", {}).get("begrunnelse", ""), "vekt": "Kassen 30%"},
-            {"navn": "Leveringspris", "score": scoring_raw.get("kassen", {}).get("leveringspris", {}).get("score", 0), "begrunnelse": scoring_raw.get("kassen", {}).get("leveringspris", {}).get("begrunnelse", ""), "vekt": "Kassen 20%"},
-            {"navn": "Leveringstid og presisjon", "score": scoring_raw.get("kassen", {}).get("leveringstid", {}).get("score", 0), "begrunnelse": scoring_raw.get("kassen", {}).get("leveringstid", {}).get("begrunnelse", ""), "vekt": "Kassen 15%"},
-            {"navn": "Betalingsalternativer", "score": scoring_raw.get("kassen", {}).get("betaling", {}).get("score", 0), "begrunnelse": scoring_raw.get("kassen", {}).get("betaling", {}).get("begrunnelse", ""), "vekt": "Kassen 15%"},
+            {"navn": "Leveringsvalg og fleksibilitet", "score": scoring_raw.get("kassen", {}).get("leveringsvalg", {}).get("score", 0), "begrunnelse": scoring_raw.get("kassen", {}).get("leveringsvalg", {}).get("begrunnelse", ""), "vekt": "Kassen 35%"},
+            {"navn": "Leveringspris", "score": scoring_raw.get("kassen", {}).get("leveringspris", {}).get("score", 0), "begrunnelse": scoring_raw.get("kassen", {}).get("leveringspris", {}).get("begrunnelse", ""), "vekt": "Kassen 25%"},
+            {"navn": "Leveringstid og presisjon", "score": scoring_raw.get("kassen", {}).get("leveringstid", {}).get("score", 0), "begrunnelse": scoring_raw.get("kassen", {}).get("leveringstid", {}).get("begrunnelse", ""), "vekt": "Kassen 20%"},
+            {"navn": "Betalingsalternativer", "score": scoring_raw.get("kassen", {}).get("betaling", {}).get("score", 0), "begrunnelse": scoring_raw.get("kassen", {}).get("betaling", {}).get("begrunnelse", ""), "vekt": "Kassen 20%"},
             {"navn": "Mersalg og produktanbefalinger", "score": scoring_raw.get("mersalg", {}).get("score", 0), "begrunnelse": scoring_raw.get("mersalg", {}).get("begrunnelse", ""), "vekt": "Mersalg 25%"},
             {"navn": "Inspirasjon og innhold", "score": scoring_raw.get("inspirasjon", {}).get("score", 0), "begrunnelse": scoring_raw.get("inspirasjon", {}).get("begrunnelse", ""), "vekt": "Inspirasjon 25%"},
         ],
         "markedsforing": [
-            {"navn": "Sosiale medier", "score": scoring_raw.get("markedsforing", {}).get("some", {}).get("score", 0), "begrunnelse": scoring_raw.get("markedsforing", {}).get("some", {}).get("begrunnelse", ""), "vekt": "SoMe 40%"},
-            {"navn": "Kundeklubb", "score": scoring_raw.get("markedsforing", {}).get("kundeklubb", {}).get("score", 0), "begrunnelse": scoring_raw.get("markedsforing", {}).get("kundeklubb", {}).get("begrunnelse", ""), "vekt": "Kundeklubb 30% (dynamisk)"},
-            {"navn": "Nyhetsbrev og SMS", "score": scoring_raw.get("markedsforing", {}).get("nyhetsbrev", {}).get("score", 0), "begrunnelse": scoring_raw.get("markedsforing", {}).get("nyhetsbrev", {}).get("begrunnelse", ""), "vekt": "Nyhetsbrev 30%"},
+            {"navn": "Sosiale medier", "score": scoring_raw.get("markedsforing", {}).get("some", {}).get("score", 0), "begrunnelse": scoring_raw.get("markedsforing", {}).get("some", {}).get("begrunnelse", ""), "vekt": "100%", "handle_direkte_i_some": scoring_raw.get("markedsforing", {}).get("some", {}).get("handle_direkte_i_some")},
+            {"navn": "Kundeklubb", "har_kundeklubb": scoring_raw.get("markedsforing", {}).get("kundeklubb", {}).get("har_kundeklubb", False), "begrunnelse": scoring_raw.get("markedsforing", {}).get("kundeklubb", {}).get("beskrivelse", ""), "vekt": "Ikke scoret – informativt"},
+            {"navn": "Nyhetsbrev og SMS", "har_nyhetsbrev": scoring_raw.get("markedsforing", {}).get("nyhetsbrev", {}).get("har_nyhetsbrev", False), "begrunnelse": scoring_raw.get("markedsforing", {}).get("nyhetsbrev", {}).get("beskrivelse", ""), "vekt": "Ikke scoret – informativt"},
         ],
     }
 
@@ -659,7 +681,12 @@ def bygg_scoring_for_visning(scoring_raw: dict) -> dict:
 # ─────────────────────────────────────────────
 # HOVED-AGENT
 # ─────────────────────────────────────────────
-def kjor_agent(filbane, api_key: str, maks: int = None, fremgang_callback=None) -> dict:
+def kjor_agent(filbane, api_key: str, maks: int = None, fremgang_callback=None, eksisterende: dict = None) -> dict:
+    """
+    eksisterende (valgfritt): resultater-dict fra en tidligere kjøring (f.eks. lastet
+    fra en gammel resultater.json). Butikker som allerede finnes der med status
+    inn/ut/usikker blir IKKE scoret på nytt – sparer API-kostnad ved gjenopptak.
+    """
     client = anthropic.Anthropic(api_key=api_key)
 
     raa_navn = les_excel(filbane)
@@ -670,11 +697,17 @@ def kjor_agent(filbane, api_key: str, maks: int = None, fremgang_callback=None) 
     if maks:
         navn_liste = navn_liste[:maks]
 
-    resultater = {}
+    resultater = dict(eksisterende) if eksisterende else {}
     totalt = len(navn_liste)
 
     for i, navn in enumerate(navn_liste):
         prosent = int((i / totalt) * 100)
+
+        if navn in resultater and resultater[navn].get("status") in ("inn", "ut", "usikker"):
+            if fremgang_callback:
+                fremgang_callback(f"[{i+1}/{totalt}] ⏭ Hopper over (allerede vurdert): {navn}", prosent)
+            continue
+
         if fremgang_callback:
             fremgang_callback(f"[{i+1}/{totalt}] Behandler: {navn}", prosent)
 
@@ -746,6 +779,17 @@ def kjor_agent(filbane, api_key: str, maks: int = None, fremgang_callback=None) 
             scoring_raw = score_nettbutikk(navn, url, klasse, client)
 
             if scoring_raw:
+                har_kjopsvilkar = scoring_raw.get("iks", {}).get("kjopsvilkar", {}).get("har_kjopsvilkar", True)
+                if har_kjopsvilkar is False:
+                    butikk["status"] = "ut"
+                    butikk["screeningBegrunnelse"] += " | Filtrert ut: fant ingen kjøpsvilkår på nettbutikken."
+                    butikk["kommentar"] = "Filtrert ut – ingen kjøpsvilkår funnet (lovpålagt, portvokterkriterium)."
+                    butikk["scoring"] = bygg_scoring_for_visning(scoring_raw)
+                    resultater[navn] = butikk
+                    if fremgang_callback:
+                        fremgang_callback(f"[{i+1}/{totalt}] ✓ {navn} ferdig", prosent)
+                    continue
+
                 totaler = beregn_totalscore(scoring_raw)
                 butikk["status"] = "inn"
                 butikk["total"] = totaler["total"]
