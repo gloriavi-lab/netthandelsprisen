@@ -302,8 +302,16 @@ def vis_detaljpanel(butikk, juryvurderinger={}):
             "🔍 Første inntrykk", "📋 Info/KS/Bærekraft", "🛒 Kassen/Mersalg", "📣 Markedsføring"
         ])
 
-        def vis_kriterier(tab, kriterier, kat_score, farge):
+        def vis_kriterier(tab, kriterier, kat_score, farge, kilde_tekst=None):
             with tab:
+                if kilde_tekst:
+                    er_faktisk = "faktisk" in kilde_tekst
+                    ikon = "✅" if er_faktisk else "🔍"
+                    farge_kilde = "#1B6B3A" if er_faktisk else "#999"
+                    st.markdown(
+                        f'<div style="font-size:11px;color:{farge_kilde};margin-bottom:8px">{ikon} Kilde: {kilde_tekst}</div>',
+                        unsafe_allow_html=True,
+                    )
                 if kat_score is not None:
                     c, bg = score_farge(kat_score)
                     st.markdown(
@@ -338,8 +346,29 @@ def vis_detaljpanel(butikk, juryvurderinger={}):
 
         vis_kriterier(tab1, scoring.get("inntrykk", []), butikk.get("inntrykk"), "#C8102E")
         vis_kriterier(tab2, scoring.get("iks", []), butikk.get("iks"), "#E87D3E")
-        vis_kriterier(tab3, scoring.get("kassen", []), butikk.get("kat3"), "#0D4A8A")
+        vis_kriterier(tab3, scoring.get("kassen", []), butikk.get("kat3"), "#0D4A8A", kilde_tekst=butikk.get("kassenKilde"))
         vis_kriterier(tab4, scoring.get("markedsforing", []), butikk.get("markedsforing"), "#1B6B3A")
+
+        if butikk.get("wcag"):
+            wcag = butikk["wcag"]
+            st.markdown('<div class="section-title">Universell utforming (WCAG 2.0/2.1 A+AA)</div>', unsafe_allow_html=True)
+            brudd = wcag.get("totalt_antall_brudd", 0)
+            c, bg = score_farge(5 if brudd == 0 else (3 if brudd < 10 else 1))
+            st.markdown(
+                f'<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">'
+                f'<span style="background:{bg};color:{c};padding:4px 12px;border-radius:6px;font-weight:700;font-size:14px">{brudd} brudd totalt</span>'
+                f'<span style="font-size:12px;color:#666">Kritisk: {wcag.get("per_alvorlighet",{}).get("critical",0)} · '
+                f'Alvorlig: {wcag.get("per_alvorlighet",{}).get("serious",0)} · '
+                f'Moderat: {wcag.get("per_alvorlighet",{}).get("moderate",0)} · '
+                f'Mindre: {wcag.get("per_alvorlighet",{}).get("minor",0)}</span>'
+                f'</div>', unsafe_allow_html=True
+            )
+            if wcag.get("wcag_suksesskriterier_brutt"):
+                st.markdown(
+                    f'<div style="font-size:12px;color:#999;margin-top:6px">WCAG-kriterier med brudd: '
+                    f'{", ".join(wcag["wcag_suksesskriterier_brutt"])}</div>', unsafe_allow_html=True
+                )
+            st.caption("Automatisert test (axe-core) – fanger typisk 30-50% av kravene. Ikke en fullstendig revisjon.")
 
     if st.button("✕ Lukk detaljer", key=f"lukk_{navn}"):
         st.session_state.valgt_butikk = None
