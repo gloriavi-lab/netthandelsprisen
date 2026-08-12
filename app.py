@@ -313,12 +313,21 @@ def vis_detaljpanel(butikk, juryvurderinger={}):
                         f'<span style="background:{bg};color:{c};padding:2px 8px;border-radius:5px;font-weight:700;font-size:13px">{kat_score}</span>'
                         f'</div>', unsafe_allow_html=True)
                 for k in kriterier:
-                    score = k.get("score", 0)
-                    c, bg = score_farge(score)
+                    if "score" in k:
+                        score = k.get("score", 0)
+                        c, bg = score_farge(score)
+                        badge_html = f'<span style="background:{bg};color:{c};padding:6px 10px;border-radius:8px;font-weight:700;font-size:16px;display:inline-block;min-width:36px;text-align:center">{score}</span>'
+                    else:
+                        # Ikke-scorede kriterier (kundeklubb/nyhetsbrev) – vis stjerne hvis ja, gråtekst hvis nei
+                        har = k.get("har_kundeklubb", k.get("har_nyhetsbrev", False))
+                        if har:
+                            badge_html = '<span style="font-size:22px;line-height:1;display:inline-block" title="Ja">⭐</span>'
+                        else:
+                            badge_html = '<span style="background:#F0EFEC;color:#999;padding:6px 10px;border-radius:8px;font-weight:700;font-size:12px;display:inline-block;min-width:36px;text-align:center">Nei</span>'
                     st.markdown(f"""
                     <div class="crit-row">
                         <div style="min-width:44px;text-align:center">
-                            <span style="background:{bg};color:{c};padding:6px 10px;border-radius:8px;font-weight:700;font-size:16px;display:inline-block;min-width:36px;text-align:center">{score}</span>
+                            {badge_html}
                         </div>
                         <div style="flex:1">
                             <div class="crit-name">{k.get("navn","")}</div>
