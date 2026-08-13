@@ -140,15 +140,72 @@ def status_html(s, enk=False):
 
 with st.sidebar:
     st.markdown("### 🏆 Netthandelsprisen")
+
+    # Alltid synlig, uansett hvor langt man har scrollet i hoveddelen – sidepanelet
+    # i Streamlit ruller uavhengig av hovedinnholdet, så dette er en pålitelig måte
+    # å alltid vise hvilken butikk man ser på (langt mer robust enn CSS/JS-triks)
+    if st.session_state.get("valgt_butikk"):
+        st.markdown(
+            f'<div style="background:#FDECEA;border:1px solid #F5C6C0;border-radius:8px;padding:10px 12px;margin-bottom:10px">'
+            f'<div style="font-size:10px;color:#999;text-transform:uppercase;letter-spacing:0.5px">Du ser nå på</div>'
+            f'<div style="font-weight:700;font-size:14px;color:#C8102E">📍 {st.session_state.valgt_butikk}</div>'
+            f'</div>', unsafe_allow_html=True
+        )
+        if st.button("✕ Lukk detaljer", key="lukk_sidebar", use_container_width=True):
+            st.session_state.valgt_butikk = None
+            st.rerun()
+
     st.markdown("---")
-    side = st.radio("Naviger", ["📋 Screening", "⭐ Topp 100", "🏆 Finale", "📦 Logistikk", "ℹ️ Informasjon"], label_visibility="collapsed")
+    side = st.radio("Naviger", ["📋 Screening", "⭐ Topp 100", "🏆 Finale", "📦 Logistikk", "ℹ️ Informasjon"], label_visibility="collapsed", key="nav_side")
+    NAV_FORKLARING = {
+        "📋 Screening": "Alle butikker og deres score, filtrerbart",
+        "⭐ Topp 100": "De høyest rangerte butikkene",
+        "🏆 Finale": "Butikker videre til finalerunden",
+        "📦 Logistikk": "Hvem bruker Posten/Bring – salgsmuligheter",
+        "ℹ️ Informasjon": "Om kriteriene og hvordan scoring virker",
+    }
+    st.caption(NAV_FORKLARING.get(side, ""))
+
+    # Globalt hurtigsøk – finn og hopp rett til en butikk uansett hvilken side du står på
+    def _hopp_til_butikk():
+        valgt = st.session_state.get("hurtigsok")
+        if valgt and valgt != "–":
+            st.session_state.valgt_butikk = valgt
+            st.session_state.nav_side = "📋 Screening"
+
+    if st.session_state.get("resultater"):
+        alle_navn = sorted(st.session_state.resultater.keys())
+        st.selectbox(
+            "🔍 Hopp til butikk", ["–"] + alle_navn, key="hurtigsok", on_change=_hopp_til_butikk,
+            help="Skriv for å søke – hopper rett til butikkens detaljer"
+        )
+
+    st.markdown("---")
+
+    with st.expander("❔ Forklaring – score, farger og forkortelser"):
+        st.markdown("""
+**Score (1–5):**
+<span style="background:#E6F4EC;color:#1B6B3A;padding:1px 6px;border-radius:4px;font-weight:700">4.5–5.0</span> Meget bra &nbsp;
+<span style="background:#E6F0FA;color:#0D4A8A;padding:1px 6px;border-radius:4px;font-weight:700">3.5–4.4</span> Bra &nbsp;
+<span style="background:#FEF3E2;color:#7A4800;padding:1px 6px;border-radius:4px;font-weight:700">2.5–3.4</span> Middels &nbsp;
+<span style="background:#FDECEA;color:#C8102E;padding:1px 6px;border-radius:4px;font-weight:700">Under 2.5</span> Svak
+
+**⭐** = butikken har dette (kundeklubb/nyhetsbrev) – vises ikke med poengsum, kun ja/nei.
+
+**Logistikk-forkortelser:** P/B = Posten/Bring, PN = PostNord, HH = Helthjem, IB = Instabox, PB = Porterbuddy, BB = Budbee
+
+**Status:** ✓ Videre = går videre i vurderingen · ✕ Ut = filtrert ut av screeningen · ⛔ ENK = enkeltpersonforetak, kvalifiserer ikke
+
+**Klasse:** Liten / Medium / Stor = basert på omsetning – Stor-klassen bedømmes strengere
+        """, unsafe_allow_html=True)
+
     st.markdown("---")
     api_key = st.secrets.get("ANTHROPIC_API_KEY", "")
     if api_key:
         st.success("✅ API-nøkkel klar")
     st.markdown("---")
-    st.markdown("**📂 Last opp resultater**")
-    st.caption("Last opp resultater.json fra Colab")
+    st.markdown("**📂 Resultater**")
+    st.caption(f"Lastes automatisk fra `{RESULTATER_FIL}` i GitHub-repoet. Last opp manuelt kun for raske engangstester nedenfor.")
     opplastet = st.file_uploader("resultater.json", type=["json"], key="json_upload", label_visibility="collapsed")
     if opplastet is not None:
         try:
@@ -180,26 +237,12 @@ def vis_detaljpanel(butikk, juryvurderinger={}):
     navn = butikk.get("name", "")
     lagret = juryvurderinger.get(navn, {})
 
-    # Fast, synlig topplinje – blir værende synlig når man scroller nedover i detaljene,
-    # slik at man alltid ser hvilken butikk man ser på, og kan lukke uten å scrolle opp
     st.markdown(
-        f'<div id="detaljpanel-topp" style="position:sticky;top:0;z-index:999;background:#fff;border-bottom:2px solid #E8E6E2;'
-        f'padding:10px 4px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">'
+        f'<div style="background:#F5F4F2;border-radius:8px;padding:10px 14px;margin-bottom:10px">'
         f'<div style="font-weight:700;font-size:15px">📍 {navn}</div>'
+        f'<div style="font-size:11px;color:#999">Du kan alltid se hvilken butikk du ser på og lukke detaljer fra sidepanelet til venstre</div>'
         f'</div>', unsafe_allow_html=True
     )
-    st.components.v1.html(
-        """<script>
-        try {
-            const el = window.parent.document.getElementById('detaljpanel-topp');
-            if (el) { el.scrollIntoView({behavior: 'smooth', block: 'start'}); }
-        } catch (e) {}
-        </script>""",
-        height=0,
-    )
-    if st.button("✕ Lukk detaljer", key=f"lukk_topp_{navn}"):
-        st.session_state.valgt_butikk = None
-        st.rerun()
 
     st.markdown('<div class="detail-panel">', unsafe_allow_html=True)
     col1, col2 = st.columns([3, 1])
