@@ -344,6 +344,29 @@ def vis_detaljpanel(butikk, juryvurderinger={}):
                         </div>
                     </div>""", unsafe_allow_html=True)
 
+        sk = butikk.get("sidekontroll")
+        if sk and sk.get("besokt"):
+            punkter = []
+            punkter.append(f"{'✅' if sk.get('kjopsvilkar_funnet') else '❌'} Kjøpsvilkår funnet")
+            punkter.append(f"{'✅' if sk.get('produktside_besokt') else '❌'} Produktside besøkt")
+            if sk.get("sok_enkelt_ord"):
+                punkter.append(f"{'✅' if sk.get('sok_enkelt_testet') else '❌'} Søk testet: «{sk['sok_enkelt_ord']}»")
+            if sk.get("sok_to_parametre"):
+                punkter.append(f"{'✅' if sk.get('sok_to_parametre_testet') else '❌'} Søk testet: «{sk['sok_to_parametre']}»")
+            if sk.get("chat_widget_funnet"):
+                punkter.append(f"✅ Chat-widget funnet ({sk.get('chat_leverandor') or 'ukjent'})")
+            st.markdown(
+                f'<div style="background:#F0F7F2;border:1px solid #C8E6D0;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#1B6B3A">'
+                f'<strong>🌐 Sitekontroll – faktisk besøkt med ekte nettleser:</strong> {" · ".join(punkter)}'
+                f'</div>', unsafe_allow_html=True
+            )
+        elif sk is False or (butikk.get("status") == "inn" and sk is None):
+            st.markdown(
+                '<div style="background:#FDECEA;border:1px solid #F5C6C0;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#C8102E">'
+                '⚠️ Sitekontroll ble ikke gjennomført for denne butikken – vurderingen er basert på websøk alene.'
+                '</div>', unsafe_allow_html=True
+            )
+
         vis_kriterier(tab1, scoring.get("inntrykk", []), butikk.get("inntrykk"), "#C8102E")
         vis_kriterier(tab2, scoring.get("iks", []), butikk.get("iks"), "#E87D3E")
         vis_kriterier(tab3, scoring.get("kassen", []), butikk.get("kat3"), "#0D4A8A", kilde_tekst=butikk.get("kassenKilde"))
