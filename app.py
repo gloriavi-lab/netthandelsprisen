@@ -179,6 +179,28 @@ with st.sidebar:
 def vis_detaljpanel(butikk, juryvurderinger={}):
     navn = butikk.get("name", "")
     lagret = juryvurderinger.get(navn, {})
+
+    # Fast, synlig topplinje – blir værende synlig når man scroller nedover i detaljene,
+    # slik at man alltid ser hvilken butikk man ser på, og kan lukke uten å scrolle opp
+    st.markdown(
+        f'<div id="detaljpanel-topp" style="position:sticky;top:0;z-index:999;background:#fff;border-bottom:2px solid #E8E6E2;'
+        f'padding:10px 4px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">'
+        f'<div style="font-weight:700;font-size:15px">📍 {navn}</div>'
+        f'</div>', unsafe_allow_html=True
+    )
+    st.components.v1.html(
+        """<script>
+        try {
+            const el = window.parent.document.getElementById('detaljpanel-topp');
+            if (el) { el.scrollIntoView({behavior: 'smooth', block: 'start'}); }
+        } catch (e) {}
+        </script>""",
+        height=0,
+    )
+    if st.button("✕ Lukk detaljer", key=f"lukk_topp_{navn}"):
+        st.session_state.valgt_butikk = None
+        st.rerun()
+
     st.markdown('<div class="detail-panel">', unsafe_allow_html=True)
     col1, col2 = st.columns([3, 1])
     with col1:
