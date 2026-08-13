@@ -369,7 +369,7 @@ def vis_detaljpanel(butikk, juryvurderinger={}):
         sk = butikk.get("sidekontroll")
         if sk and sk.get("besokt"):
             punkter = []
-            punkter.append(f"{'✅' if sk.get('kjopsvilkar_funnet') else '❌'} Kjøpsvilkår funnet")
+            punkter.append(f"{'✅' if sk.get('kjopsvilkar_funnet') else '❔'} Kjøpsvilkår-lenke funnet av automatisk søk")
             punkter.append(f"{'✅' if sk.get('produktside_besokt') else '❌'} Produktside besøkt")
             if sk.get("sok_enkelt_ord"):
                 punkter.append(f"{'✅' if sk.get('sok_enkelt_testet') else '❌'} Søk testet: «{sk['sok_enkelt_ord']}»")
@@ -380,6 +380,7 @@ def vis_detaljpanel(butikk, juryvurderinger={}):
             st.markdown(
                 f'<div style="background:#F0F7F2;border:1px solid #C8E6D0;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#1B6B3A">'
                 f'<strong>🌐 Sitekontroll – faktisk besøkt med ekte nettleser:</strong> {" · ".join(punkter)}'
+                f'<div style="color:#888;margin-top:4px;font-style:italic">Dette er et separat, automatisk sidesøk – kan avvike fra kriterievurderingen over, som også bruker Claudes bredere vurdering. Stol på scoren over ved uenighet.</div>'
                 f'</div>', unsafe_allow_html=True
             )
         elif sk is False or (butikk.get("status") == "inn" and sk is None):
