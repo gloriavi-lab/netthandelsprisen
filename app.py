@@ -358,7 +358,11 @@ def vis_detaljpanel(butikk, juryvurderinger={}):
         ikon = "● " if har else ""
         lcols[j].markdown(f'<div class="logi-box {css}">{ikon}{aktør}</div>', unsafe_allow_html=True)
     if not noen_funnet:
-        st.caption("ℹ️ Ingen logistikkpartnere identifisert denne kjøringen.")
+        sk = butikk.get("sidekontroll")
+        if not sk or not sk.get("besokt"):
+            st.caption("⚠️ Kunne ikke bekreftes – sitekontroll ble trolig blokkert (bot-beskyttelse) eller kjørte ikke. Ikke tolk dette som at butikken ikke bruker noen av disse – sjekk manuelt, spesielt for store/internasjonale aktører.")
+        else:
+            st.caption("ℹ️ Ingen logistikkpartnere identifisert i faktisk undersøkt sideinnhold denne kjøringen.")
 
     if butikk.get("scoring"):
         st.markdown('<div class="section-title">Kriteriegjennomgang</div>', unsafe_allow_html=True)
@@ -408,6 +412,13 @@ def vis_detaljpanel(butikk, juryvurderinger={}):
                             <div class="crit-vekt">{k.get("vekt","")}</div>
                         </div>
                     </div>""", unsafe_allow_html=True)
+
+        if butikk.get("krevManuellSjekk"):
+            st.markdown(
+                f'<div style="background:#FEF3E2;border:2px solid #E8A020;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:13px;color:#7A4800">'
+                f'<strong>⚠️ Krever manuell sjekk:</strong> {butikk["krevManuellSjekk"]}'
+                f'</div>', unsafe_allow_html=True
+            )
 
         sk = butikk.get("sidekontroll")
         if sk and sk.get("besokt"):
@@ -477,12 +488,13 @@ if side == "📋 Screening":
         ("inn","Går videre",sum(1 for s in alle if s.get("status")=="inn" and not s.get("enk")),"#1B6B3A"),
         ("ut","Filtrert ut",sum(1 for s in alle if s.get("status")=="ut" and not s.get("enk")),"#C8102E"),
         ("usikker","Krever sjekk",sum(1 for s in alle if s.get("status")=="usikker"),"#7A4800"),
+        ("manuell_sjekk","⚠️ Manuell sjekk",sum(1 for s in alle if s.get("krevManuellSjekk")),"#E8A020"),
         ("enk","ENK",sum(1 for s in alle if s.get("enk")),"#C8102E"),
         ("liten","Liten",sum(1 for s in alle if s.get("klasse")=="Liten"),"#0D4A8A"),
         ("medium","Medium",sum(1 for s in alle if s.get("klasse")=="Medium"),"#7A4800"),
         ("stor","Stor",sum(1 for s in alle if s.get("klasse")=="Stor"),"#5B2D8E"),
     ]
-    cols = st.columns(8)
+    cols = st.columns(9)
     for i, (key, label, verdi, farge) in enumerate(filtre_def):
         with cols[i]:
             if st.button(f"{label}\n{verdi}", key=f"stat_{key}", use_container_width=True):
@@ -502,6 +514,7 @@ if side == "📋 Screening":
     if cf == "inn": vis = [s for s in vis if s.get("status")=="inn" and not s.get("enk")]
     elif cf == "ut": vis = [s for s in vis if s.get("status")=="ut" and not s.get("enk")]
     elif cf == "usikker": vis = [s for s in vis if s.get("status")=="usikker"]
+    elif cf == "manuell_sjekk": vis = [s for s in vis if s.get("krevManuellSjekk")]
     elif cf == "enk": vis = [s for s in vis if s.get("enk")]
     elif cf == "liten": vis = [s for s in vis if s.get("klasse")=="Liten"]
     elif cf == "medium": vis = [s for s in vis if s.get("klasse")=="Medium"]
