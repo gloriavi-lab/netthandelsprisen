@@ -137,12 +137,12 @@ def sikre_kriterier_seedet(sh):
     if len(ws.get_all_values()) <= 1:
         rader = [[1, kat, krit, rekkefolge] for kat, krit, rekkefolge in STANDARD_KRITERIER_RUNDE1]
         ws.append_rows(rader)
-        try:
-            ws.format("A1:D1", {"backgroundColor": {"red": 0.784, "green": 0.063, "blue": 0.184}, "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}}})
-            ws.freeze(rows=1)
-            ws.columns_auto_resize(0, 3)
-        except Exception:
-            pass
+    try:
+        ws.format("A1:D1", {"backgroundColor": {"red": 0.784, "green": 0.063, "blue": 0.184}, "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}}})
+        ws.freeze(rows=1)
+        ws.columns_auto_resize(0, 3)
+    except Exception:
+        pass
     return ws
 
 
@@ -157,12 +157,11 @@ def hent_kriterier(sh, runde: int) -> list:
 
 def hent_vurderinger_ark(sh):
     ws = hent_eller_lag_ark(sh, "Vurderinger", ["Butikk", "Jurymedlem", "Runde", "Kategori", "Kriterium", "Score", "Kommentar", "Tidsstempel"])
-    if len(ws.get_all_values()) == 1:
-        try:
-            ws.format("A1:H1", {"backgroundColor": {"red": 0.784, "green": 0.063, "blue": 0.184}, "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}}})
-            ws.freeze(rows=1)
-        except Exception:
-            pass
+    try:
+        ws.format("A1:H1", {"backgroundColor": {"red": 0.784, "green": 0.063, "blue": 0.184}, "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}}})
+        ws.freeze(rows=1)
+    except Exception:
+        pass
     return ws
 
 
@@ -288,8 +287,7 @@ def sikre_oversikt_seedet(sh, resultater: dict, topp300_navn: list):
         ])
     if nye_rader:
         ws.append_rows(nye_rader)
-    if var_tom or nye_rader:
-        formater_oversikt_ark(ws)
+    formater_oversikt_ark(ws)
     return ws
 
 
