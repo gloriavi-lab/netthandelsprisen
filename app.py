@@ -137,6 +137,12 @@ def sikre_kriterier_seedet(sh):
     if len(ws.get_all_values()) <= 1:
         rader = [[1, kat, krit, rekkefolge] for kat, krit, rekkefolge in STANDARD_KRITERIER_RUNDE1]
         ws.append_rows(rader)
+        try:
+            ws.format("A1:D1", {"backgroundColor": {"red": 0.784, "green": 0.063, "blue": 0.184}, "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}}})
+            ws.freeze(rows=1)
+            ws.columns_auto_resize(0, 3)
+        except Exception:
+            pass
     return ws
 
 
@@ -150,7 +156,14 @@ def hent_kriterier(sh, runde: int) -> list:
 
 
 def hent_vurderinger_ark(sh):
-    return hent_eller_lag_ark(sh, "Vurderinger", ["Butikk", "Jurymedlem", "Runde", "Kategori", "Kriterium", "Score", "Kommentar", "Tidsstempel"])
+    ws = hent_eller_lag_ark(sh, "Vurderinger", ["Butikk", "Jurymedlem", "Runde", "Kategori", "Kriterium", "Score", "Kommentar", "Tidsstempel"])
+    if len(ws.get_all_values()) == 1:
+        try:
+            ws.format("A1:H1", {"backgroundColor": {"red": 0.784, "green": 0.063, "blue": 0.184}, "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}}})
+            ws.freeze(rows=1)
+        except Exception:
+            pass
+    return ws
 
 
 def hent_vurderinger(sh, runde: int, butikk: str = None) -> list:
@@ -238,12 +251,30 @@ def hent_aktive_butikker_for_runde(sh, resultater: dict, runde: int, topp300_nav
     return aktive
 
 
+def formater_oversikt_ark(ws):
+    """Gir Oversikt-arket et ryddig, profesjonelt utseende – farget overskrift, frosset
+    toppmeny, tilpassede kolonnebredder. Kjøres kun én gang (trygt å kjøre flere ganger)."""
+    try:
+        ws.format("A1:F1", {
+            "backgroundColor": {"red": 0.784, "green": 0.063, "blue": 0.184},  # Posten-rød
+            "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}, "fontSize": 11},
+            "horizontalAlignment": "CENTER",
+        })
+        ws.freeze(rows=1)
+        ws.columns_auto_resize(0, 5)
+        ws.format("A2:A1000", {"textFormat": {"bold": True}})
+        ws.format("F2:F1000", {"wrapStrategy": "WRAP", "verticalAlignment": "TOP"})
+    except Exception:
+        pass  # formatering er kun kosmetisk – la ikke dette stoppe selve funksjonaliteten
+
+
 def sikre_oversikt_seedet(sh, resultater: dict, topp300_navn: list):
     """Fyller 'Oversikt'-fanen med alle butikkene i Topp 300 automatisk, slik at arket
     ser ferdig strukturert ut fra første stund – ikke bare tomt til noen scorer noe."""
     ws = hent_eller_lag_ark(sh, "Oversikt", ["Butikk", "URL", "Org.form", "Bransje", "Klasse", "Beskrivelse"])
     eksisterende = set()
     alle = ws.get_all_values()
+    var_tom = len(alle) <= 1
     if len(alle) > 1:
         eksisterende = {rad[0] for rad in alle[1:] if rad}
     nye_rader = []
@@ -257,6 +288,8 @@ def sikre_oversikt_seedet(sh, resultater: dict, topp300_navn: list):
         ])
     if nye_rader:
         ws.append_rows(nye_rader)
+    if var_tom or nye_rader:
+        formater_oversikt_ark(ws)
     return ws
 
 
