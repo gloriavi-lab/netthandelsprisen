@@ -80,39 +80,174 @@ if "valgt_butikk" not in st.session_state:
 if "screening_filter" not in st.session_state:
     st.session_state.screening_filter = "alle"
 
-def koble_sheets():
+# ─────────────────────────────────────────────
+# JURY-SYSTEM – Google Sheets-integrasjon
+# ─────────────────────────────────────────────
+# Kriteriene fra fjorårets Excel-ark (5 kategorier, 15 underkriterier) – brukes som
+# utgangspunkt for Runde 1. Kan redigeres direkte i "Kriterier"-arket i Google Sheets
+# mellom rundene uten at appen må endres.
+STANDARD_KRITERIER_RUNDE1 = [
+    ("Førsteinntrykk", "Opplevelse: Bildebruk, beskrivelser o.l.", 1),
+    ("Førsteinntrykk", "Navigasjon / UX", 2),
+    ("Førsteinntrykk", "Søk: auto-korrektur, synonymer, utlisting, forslag", 3),
+    ("Kundeservice & Tilgjengelighet", "Lett tilgjengelig info om levering, retur og kjøpsvilkår", 4),
+    ("Kundeservice & Tilgjengelighet", "Google/Trustpilot/andre åpne løsninger for kundetilfredshet", 5),
+    ("Kundeservice & Tilgjengelighet", "Tilgjengelighet, åpningstider, kanaler, responstid", 6),
+    ("Kundeservice & Tilgjengelighet", "Bærekraft", 7),
+    ("Kjøp/inspirasjon/personalisering", "Kassen: Levering, betaling", 8),
+    ("Kjøp/inspirasjon/personalisering", "Inspirasjon", 9),
+    ("Kjøp/inspirasjon/personalisering", "Mersalg/anbefalinger/personalisering", 10),
+    ("Markedsføring/kundedialog", "Bruk av SoMe", 11),
+    ("Markedsføring/kundedialog", "Betalt og organisk synlighet", 12),
+    ("Markedsføring/kundedialog", "E-post", 13),
+    ("Innovasjon", "Innovative løsninger", 14),
+    ("Innovasjon", "Adopsjon av nye teknologier for styrke konkurransekraft", 15),
+    ("Innovasjon", "Kommersielt håndverk", 16),
+]
+
+KLASSER = ["Liten", "Medium", "Stor"]
+
+
+def koble_gsheets():
+    """Kobler til hele Google Sheet-et (ikke bare ett faneblad). Returnerer None ved feil."""
     try:
         creds_info = st.secrets["gcp_service_account"]
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
         creds = Credentials.from_service_account_info(creds_info, scopes=scope)
         gc = gspread.authorize(creds)
-        return gc.open_by_key(st.secrets["google_sheets"]["sheet_id"]).sheet1
-    except Exception:
+        return gc.open_by_key(st.secrets["google_sheets"]["sheet_id"])
+    except Exception as e:
+        st.session_state["_gsheets_feil"] = str(e)
         return None
 
-def lagre_jury(navn, score, status, notat):
-    ws = koble_sheets()
-    if not ws:
-        return False
-    try:
-        data = ws.get_all_records()
-        for i, rad in enumerate(data, 2):
-            if rad.get("Navn") == navn:
-                ws.update(f"D{i}:F{i}", [[score, status, notat]])
-                return True
-        ws.append_row([navn, "", "", score, status, notat])
-        return True
-    except Exception:
-        return False
 
-def hent_jury():
-    ws = koble_sheets()
-    if not ws:
-        return {}
+def hent_eller_lag_ark(sh, navn, headers):
+    """Henter et faneblad hvis det finnes, oppretter det med riktige kolonneoverskrifter hvis ikke."""
     try:
-        return {r["Navn"]: r for r in ws.get_all_records() if r.get("Navn")}
+        return sh.worksheet(navn)
+    except gspread.WorksheetNotFound:
+        ws = sh.add_worksheet(title=navn, rows=1000, cols=max(10, len(headers)))
+        ws.append_row(headers)
+        return ws
+
+
+def sikre_kriterier_seedet(sh):
+    """Fyller inn Runde 1-kriteriene automatisk første gang arket brukes."""
+    ws = hent_eller_lag_ark(sh, "Kriterier", ["Runde", "Kategori", "Kriterium", "Rekkefolge"])
+    if len(ws.get_all_values()) <= 1:
+        rader = [[1, kat, krit, rekkefolge] for kat, krit, rekkefolge in STANDARD_KRITERIER_RUNDE1]
+        ws.append_rows(rader)
+    return ws
+
+
+def hent_kriterier(sh, runde: int) -> list:
+    """Returnerer [(kategori, kriterium), ...] for en gitt runde, i riktig rekkefølge."""
+    ws = sikre_kriterier_seedet(sh)
+    rader = ws.get_all_records()
+    filtrert = [r for r in rader if str(r.get("Runde")) == str(runde)]
+    filtrert.sort(key=lambda r: r.get("Rekkefolge", 0))
+    return [(r["Kategori"], r["Kriterium"]) for r in filtrert]
+
+
+def hent_vurderinger_ark(sh):
+    return hent_eller_lag_ark(sh, "Vurderinger", ["Butikk", "Jurymedlem", "Runde", "Kategori", "Kriterium", "Score", "Kommentar", "Tidsstempel"])
+
+
+def hent_vurderinger(sh, runde: int, butikk: str = None) -> list:
+    ws = hent_vurderinger_ark(sh)
+    rader = ws.get_all_records()
+    rader = [r for r in rader if str(r.get("Runde")) == str(runde)]
+    if butikk:
+        rader = [r for r in rader if r.get("Butikk") == butikk]
+    return rader
+
+
+def lagre_vurdering(sh, butikk, jurymedlem, runde, kategori, kriterium, score, kommentar):
+    """Lagrer/oppdaterer én vurdering. Samme jurymedlem+butikk+runde+kriterium overskriver forrige svar."""
+    import datetime
+    ws = hent_vurderinger_ark(sh)
+    alle = ws.get_all_values()
+    tidsstempel = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    for i, rad in enumerate(alle[1:], start=2):  # rad 1 er header
+        if len(rad) >= 5 and rad[0] == butikk and rad[1] == jurymedlem and str(rad[2]) == str(runde) and rad[4] == kriterium:
+            ws.update(f"F{i}:H{i}", [[score, kommentar, tidsstempel]])
+            return i
+    ws.append_row([butikk, jurymedlem, runde, kategori, kriterium, score, kommentar, tidsstempel])
+    return len(alle) + 1
+
+
+def beregn_snittscore_per_butikk(vurderinger: list) -> dict:
+    """Snittscore per butikk på tvers av alle kriterier og jurymedlemmer som har vurdert den."""
+    from collections import defaultdict
+    sum_per_butikk = defaultdict(list)
+    for v in vurderinger:
+        try:
+            sum_per_butikk[v["Butikk"]].append(float(v["Score"]))
+        except (ValueError, KeyError):
+            continue
+    return {b: round(sum(s) / len(s), 2) for b, s in sum_per_butikk.items() if s}
+
+
+def hent_innstillinger_ark(sh):
+    return hent_eller_lag_ark(sh, "Innstillinger", ["Runde", "AntallLiten", "AntallMedium", "AntallStor"])
+
+
+def hent_cutoff(sh, runde: int) -> dict:
+    """Antall butikker per klasse som går videre FRA denne runden. Standardverdier hvis ikke satt."""
+    ws = hent_innstillinger_ark(sh)
+    rader = ws.get_all_records()
+    for r in rader:
+        if str(r.get("Runde")) == str(runde):
+            return {"Liten": int(r.get("AntallLiten", 30)), "Medium": int(r.get("AntallMedium", 30)), "Stor": int(r.get("AntallStor", 30))}
+    return {"Liten": 30, "Medium": 30, "Stor": 30}
+
+
+def lagre_cutoff(sh, runde: int, antall_liten, antall_medium, antall_stor):
+    ws = hent_innstillinger_ark(sh)
+    alle = ws.get_all_values()
+    for i, rad in enumerate(alle[1:], start=2):
+        if len(rad) >= 1 and str(rad[0]) == str(runde):
+            ws.update(f"B{i}:D{i}", [[antall_liten, antall_medium, antall_stor]])
+            return
+    ws.append_row([runde, antall_liten, antall_medium, antall_stor])
+
+
+def hent_aktive_butikker_for_runde(sh, resultater: dict, runde: int, topp300_navn: list) -> list:
+    """
+    Runde 1: de forhåndsvalgte topp 300 (fra app-screeningen).
+    Runde 2/3: de som klarte cutoff i forrige runde, filtrert per klasse (Liten/Medium/Stor)
+    for å sikre at alle størrelser er representert.
+    """
+    if runde == 1:
+        return topp300_navn
+
+    forrige_vurderinger = hent_vurderinger(sh, runde - 1)
+    snitt = beregn_snittscore_per_butikk(forrige_vurderinger)
+    cutoff = hent_cutoff(sh, runde - 1)
+
+    per_klasse = {"Liten": [], "Medium": [], "Stor": []}
+    for navn, score in snitt.items():
+        klasse = resultater.get(navn, {}).get("klasse", "Ukjent")
+        if klasse in per_klasse:
+            per_klasse[klasse].append((navn, score))
+
+    aktive = []
+    for klasse, liste in per_klasse.items():
+        liste.sort(key=lambda x: x[1], reverse=True)
+        aktive.extend([navn for navn, _ in liste[:cutoff.get(klasse, 30)]])
+    return aktive
+
+
+def lag_sheet_lenke(sh, butikk_navn: str, runde: int) -> str:
+    """Prøver å finne butikkens rad i Vurderinger-arket og lage en direktelenke dit."""
+    try:
+        ws = hent_vurderinger_ark(sh)
+        celle = ws.find(butikk_navn)
+        if celle:
+            return f"https://docs.google.com/spreadsheets/d/{sh.id}/edit#gid={ws.id}&range=A{celle.row}"
     except Exception:
-        return {}
+        pass
+    return f"https://docs.google.com/spreadsheets/d/{sh.id}/edit"
 
 def score_farge(s):
     if s is None: return "#999", "#eee"
@@ -156,11 +291,12 @@ with st.sidebar:
             st.rerun()
 
     st.markdown("---")
-    side = st.radio("Naviger", ["📋 Screening", "⭐ Topp 100", "🏆 Finale", "📦 Logistikk", "ℹ️ Informasjon"], label_visibility="collapsed", key="nav_side")
+    side = st.radio("Naviger", ["📋 Screening", "⭐ Topp 300", "🧑‍⚖️ Jury", "🏆 Finale", "📦 Logistikk", "ℹ️ Informasjon"], label_visibility="collapsed", key="nav_side")
     NAV_FORKLARING = {
         "📋 Screening": "Alle butikker og deres score, filtrerbart",
-        "⭐ Topp 100": "De høyest rangerte butikkene",
-        "🏆 Finale": "Butikker videre til finalerunden",
+        "⭐ Topp 300": "De 300 butikkene som går videre til juryen",
+        "🧑‍⚖️ Jury": "Vurder butikkene – score og kommentarer",
+        "🏆 Finale": "Finalister basert på jury sin vurdering",
         "📦 Logistikk": "Hvem bruker Posten/Bring – salgsmuligheter",
         "ℹ️ Informasjon": "Om kriteriene og hvordan scoring virker",
     }
@@ -297,12 +433,11 @@ def vis_detaljpanel(butikk, juryvurderinger={}):
 
     if butikk.get("total") is not None:
         st.markdown('<div class="section-title">Kategoriscorer</div>', unsafe_allow_html=True)
-        scol = st.columns(5)
+        scol = st.columns(4)
         kategorier = [
             ("Total", butikk.get("total"), "#212121"),
             ("Første inntrykk", butikk.get("inntrykk"), "#C8102E"),
             ("Info/KS/BK", butikk.get("iks"), "#E87D3E"),
-            ("Kassen/Mersalg", butikk.get("kat3"), "#0D4A8A"),
             ("Markedsf.", butikk.get("markedsforing"), "#1B6B3A"),
         ]
         for i, (label, val, farge) in enumerate(kategorier):
@@ -311,9 +446,6 @@ def vis_detaljpanel(butikk, juryvurderinger={}):
             if label == "Info/KS/BK" and butikk.get("iksDetalj"):
                 d = butikk["iksDetalj"]
                 sub = f'<div style="font-size:11px;color:#999;margin-top:4px">KLR:{d.get("klr","–")} KS:{d.get("kundeservice","–")} BK:{d.get("baerekraft","–")}</div>'
-            if label == "Kassen/Mersalg" and butikk.get("kat3Detalj"):
-                d = butikk["kat3Detalj"]
-                sub = f'<div style="font-size:11px;color:#999;margin-top:4px">K:{d.get("kassen","–")} M:{d.get("mersalg","–")} I:{d.get("inspirasjon","–")}</div>'
             scol[i].markdown(
                 f'<div style="background:white;border-radius:10px;padding:16px 12px;text-align:center;border-top:4px solid {farge};box-shadow:0 1px 4px rgba(0,0,0,0.08);min-height:110px">'
                 f'<div style="font-size:11px;color:#999;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">{label}</div>'
@@ -322,21 +454,14 @@ def vis_detaljpanel(butikk, juryvurderinger={}):
                 unsafe_allow_html=True
             )
 
-    st.markdown('<div class="section-title">Teknisk kvalitet og mobilopplevelse</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Teknisk kvalitet</div>', unsafe_allow_html=True)
     tech = butikk.get("tech") or {}
     if tech:
         def tbadge(v, l):
             cls = "tech-ok" if v == "ok" else "tech-warn" if v == "warn" else "tech-bad"
             ikon = "✓" if v == "ok" else "⚠" if v == "warn" else "✕"
             return f'<span class="{cls}">{ikon} {l}</span>'
-        tp_raw = tech.get("trustpilot", "Ikke funnet")
-        if isinstance(tp_raw, dict):
-            tp_html = f'<span class="tech-ok">⭐ Trustpilot {tp_raw.get("score","")}/5 – {str(tp_raw.get("begrunnelse",""))[:60]}</span>'
-        elif tp_raw and tp_raw != "Ikke funnet":
-            tp_html = f'<span class="tech-ok">⭐ {tp_raw}</span>'
-        else:
-            tp_html = '<span class="tech-warn">⭐ Trustpilot ikke funnet</span>'
-        st.markdown(tbadge(tech.get("mobil","warn"), "Mobilvennlig") + " " + tbadge(tech.get("ssl","warn"), "SSL") + " " + tbadge(tech.get("lastetid","warn"), "Lastetid") + " " + tp_html, unsafe_allow_html=True)
+        st.markdown(tbadge(tech.get("ssl","warn"), "SSL") + " " + tbadge(tech.get("lastetid","warn"), "Lastetid"), unsafe_allow_html=True)
     else:
         st.caption("Ikke sjekket")
 
@@ -367,8 +492,8 @@ def vis_detaljpanel(butikk, juryvurderinger={}):
     if butikk.get("scoring"):
         st.markdown('<div class="section-title">Kriteriegjennomgang</div>', unsafe_allow_html=True)
         scoring = butikk["scoring"]
-        tab1, tab2, tab3, tab4 = st.tabs([
-            "🔍 Første inntrykk", "📋 Info/KS/Bærekraft", "🛒 Kassen/Mersalg", "📣 Markedsføring"
+        tab1, tab2, tab4 = st.tabs([
+            "🔍 Første inntrykk", "📋 Info/KS/Bærekraft", "📣 Markedsføring"
         ])
 
         def vis_kriterier(tab, kriterier, kat_score, farge, kilde_tekst=None):
@@ -446,7 +571,6 @@ def vis_detaljpanel(butikk, juryvurderinger={}):
 
         vis_kriterier(tab1, scoring.get("inntrykk", []), butikk.get("inntrykk"), "#C8102E")
         vis_kriterier(tab2, scoring.get("iks", []), butikk.get("iks"), "#E87D3E")
-        vis_kriterier(tab3, scoring.get("kassen", []), butikk.get("kat3"), "#0D4A8A", kilde_tekst=butikk.get("kassenKilde"))
         vis_kriterier(tab4, scoring.get("markedsforing", []), butikk.get("markedsforing"), "#1B6B3A")
 
         if butikk.get("wcag"):
@@ -524,9 +648,8 @@ if side == "📋 Screening":
     if sok: vis = [s for s in vis if sok.lower() in s.get("name","").lower()]
     vis = sorted(vis, key=lambda x: x.get("total") or 0, reverse=True)
     st.markdown(f"**Viser {len(vis)} butikker**")
-    juryvurderinger = hent_jury()
     if st.session_state.valgt_butikk and st.session_state.valgt_butikk in r:
-        vis_detaljpanel(r[st.session_state.valgt_butikk], juryvurderinger)
+        vis_detaljpanel(r[st.session_state.valgt_butikk])
     st.markdown("---")
     for i, s in enumerate(vis):
         tcol = st.columns([3,2,1,1,1,1,2,2])
@@ -567,99 +690,166 @@ if side == "📋 Screening":
         df = pd.DataFrame([{"Nettbutikk": s.get("name"), "URL": s.get("url",""), "Bransje": s.get("bransje",""), "Status": s.get("status",""), "Klasse": s.get("klasse",""), "Total": s.get("total","")} for s in vis])
         st.download_button("↓ Eksporter CSV", df.to_csv(index=False, sep=";").encode("utf-8-sig"), "screening.csv", "text/csv")
 
-elif side == "⭐ Topp 100":
-    st.header("⭐ Topp 100 – Juryens arbeidsflate")
+elif side == "⭐ Topp 300":
+    st.header("⭐ Topp 300 – går videre til juryvurdering")
     if not st.session_state.resultater:
         st.info("Last opp resultater.json i sidepanelet.")
         st.stop()
     r = st.session_state.resultater
-    juryvurderinger = hent_jury()
-    def hent_topp(klasse, n=34):
+    st.caption("Poengsummene fra app-screeningen vises IKKE her – juryen skal vurdere butikkene uten å påvirkes av AI-scoren.")
+
+    def hent_topp300(klasse, n=100):
         return sorted([v for v in r.values() if v.get("status")=="inn" and not v.get("enk") and v.get("klasse")==klasse and v.get("total") is not None], key=lambda x: x.get("total",0), reverse=True)[:n]
-    liten = hent_topp("Liten")
-    medium = hent_topp("Medium")
-    stor = hent_topp("Stor")
+    liten = hent_topp300("Liten")
+    medium = hent_topp300("Medium")
+    stor = hent_topp300("Stor")
     alle_topp = liten + medium + stor
+    st.session_state["_topp300_navn"] = [b.get("name") for b in alle_topp]
+
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Totalt i Topp 100", len(alle_topp))
+    col1.metric("Totalt i Topp 300", len(alle_topp))
     col2.metric("Liten", len(liten))
     col3.metric("Medium", len(medium))
     col4.metric("Stor", len(stor))
     klasse_tab = st.radio("Vis", ["Alle","Liten","Medium","Stor"], horizontal=True)
     vis_liste = {"Liten":liten,"Medium":medium,"Stor":stor}.get(klasse_tab, alle_topp)
-    if st.session_state.valgt_butikk and st.session_state.valgt_butikk in r:
-        vis_detaljpanel(r[st.session_state.valgt_butikk], juryvurderinger)
     st.markdown("---")
-    for i, butikk in enumerate(vis_liste):
+    for butikk in vis_liste:
         navn = butikk.get("name","")
-        lagret = juryvurderinger.get(navn, {})
-        js = lagret.get("Status", butikk.get("juryStatus","Ikke vurdert"))
-        jsc = int(lagret.get("Juryscore", butikk.get("juryScore",0)) or 0)
-        with st.expander(f"**{i+1}. {navn}** — {butikk.get('total','–')} | {butikk.get('klasse','')} | {butikk.get('bransje','–')} {'⭐'*jsc if jsc else ''}"):
-            c1, c2, c3 = st.columns([3,1,1])
-            with c1:
-                if butikk.get("url"): st.markdown(f'🌐 [{butikk["url"]}]({butikk["url"]})')
-                st.caption(butikk.get("kommentar",""))
-            with c2:
-                st.metric("Inntrykk", butikk.get("inntrykk","–"))
-                st.metric("IKS", butikk.get("iks","–"))
-            with c3:
-                st.metric("Kassen", butikk.get("kat3","–"))
-                st.metric("Markedsf.", butikk.get("markedsforing","–"))
-            jc1, jc2, jc3 = st.columns([1,1,2])
-            with jc1:
-                ny_score = st.select_slider("Juryscore", [1,2,3,4,5], value=max(1,min(5,jsc or 3)), format_func=lambda x: "⭐"*x, key=f"ts_{navn}")
-            with jc2:
-                if js not in ["Ikke vurdert","Kandidat","Semifinalist","Finalist","Vinner"]: js = "Ikke vurdert"
-                ny_status = st.selectbox("Status", ["Ikke vurdert","Kandidat","Semifinalist","Finalist","Vinner"], index=["Ikke vurdert","Kandidat","Semifinalist","Finalist","Vinner"].index(js), key=f"tstat_{navn}")
-            with jc3:
-                ny_notat = st.text_input("Notat", value=lagret.get("Notat",""), key=f"tnot_{navn}")
-            ca, cb = st.columns([1,3])
-            with ca:
-                if st.button("💾 Lagre", key=f"tlagre_{navn}"):
-                    lagre_jury(navn, ny_score, ny_status, ny_notat)
-                    st.session_state.resultater[navn]["juryScore"] = ny_score
-                    st.session_state.resultater[navn]["juryStatus"] = ny_status
-                    st.success("Lagret!")
-            with cb:
-                if st.button("🔍 Vis full detalj", key=f"tdet_{navn}"):
-                    st.session_state.valgt_butikk = navn
-                    st.rerun()
+        c1, c2 = st.columns([4,1])
+        with c1:
+            st.markdown(f"**{navn}** — {butikk.get('klasse','')} · {butikk.get('bransje','–')}")
+            if butikk.get("url"): st.caption(f'🌐 {butikk["url"]}')
+        with c2:
+            if st.button("🧑‍⚖️ Til jury", key=f"tj300_{navn}"):
+                st.session_state["_jury_valgt_butikk"] = navn
+                st.session_state.nav_side = "🧑‍⚖️ Jury"
+                st.rerun()
+        st.markdown("---")
 
-elif side == "🏆 Finale":
-    st.header("🏆 Finale – Juryens endelige vurderinger")
+elif side == "🧑‍⚖️ Jury":
+    st.header("🧑‍⚖️ Jury – vurdering av butikker")
     if not st.session_state.resultater:
         st.info("Last opp resultater.json i sidepanelet.")
         st.stop()
     r = st.session_state.resultater
-    juryvurderinger = hent_jury()
-    finalister = []
-    for navn, butikk in r.items():
-        lagret = juryvurderinger.get(navn, {})
-        status = lagret.get("Status", butikk.get("juryStatus","Ikke vurdert"))
-        if status in ["Semifinalist","Finalist","Vinner"]:
-            b = dict(butikk)
-            b["juryStatus"] = status
-            b["juryScore"] = int(lagret.get("Juryscore", butikk.get("juryScore",0)) or 0)
-            b["juryNote"] = lagret.get("Notat", butikk.get("juryNote",""))
-            finalister.append(b)
-    if not finalister:
-        st.info("Ingen butikker er merket som Semifinalist, Finalist eller Vinner ennå.")
+
+    sh = koble_gsheets()
+    if not sh:
+        st.error("Kunne ikke koble til Google Sheets. Sjekk at 'gcp_service_account' og 'google_sheets' er satt riktig i Secrets.")
+        if st.session_state.get("_gsheets_feil"):
+            st.caption(f"Feilmelding: {st.session_state['_gsheets_feil']}")
         st.stop()
-    rang = {"Vinner":0,"Finalist":1,"Semifinalist":2}
-    finalister.sort(key=lambda x: (rang.get(x.get("juryStatus"),3), -(x.get("juryScore") or 0)))
-    filter_val = st.radio("Vis", ["Alle","Vinnere","Finalister","Semifinalister"], horizontal=True)
-    if filter_val == "Vinnere": finalister = [f for f in finalister if f.get("juryStatus")=="Vinner"]
-    elif filter_val == "Finalister": finalister = [f for f in finalister if f.get("juryStatus")=="Finalist"]
-    elif filter_val == "Semifinalister": finalister = [f for f in finalister if f.get("juryStatus")=="Semifinalist"]
-    farge_map = {"Vinner":"#C8102E","Finalist":"#B8860B","Semifinalist":"#1B6B3A"}
-    ikon_map = {"Vinner":"🏆","Finalist":"★","Semifinalist":"◐"}
-    for i, b in enumerate(finalister):
-        status = b.get("juryStatus","")
-        farge = farge_map.get(status,"#666")
-        ikon = ikon_map.get(status,"")
-        stjerner = "⭐" * int(b.get("juryScore") or 0)
-        st.markdown(f'<div style="background:white;border-radius:12px;padding:20px 24px;margin-bottom:14px;border-left:5px solid {farge};box-shadow:0 1px 6px rgba(0,0,0,0.08)"><div style="display:flex;align-items:center;gap:16px"><span style="font-size:24px;font-weight:700;color:{farge}">{ikon} {i+1}</span><div style="flex:1"><div style="font-size:17px;font-weight:700">{b.get("name")}</div><div style="font-size:13px;color:#C8102E">{b.get("url","")}</div></div><div style="text-align:right"><div style="font-weight:700;color:{farge};font-size:15px">{status}</div><div style="font-size:22px">{stjerner}</div></div></div></div>', unsafe_allow_html=True)
+
+    jc1, jc2 = st.columns([1, 2])
+    with jc1:
+        runde = st.selectbox("Runde", [1, 2, 3], format_func=lambda x: f"Runde {x}")
+    with jc2:
+        jurynavn = st.text_input("Ditt navn (jurymedlem)", value=st.session_state.get("_jurynavn", ""), placeholder="Skriv navnet ditt her")
+        st.session_state["_jurynavn"] = jurynavn
+
+    if not jurynavn:
+        st.warning("Skriv inn navnet ditt over for å begynne å vurdere.")
+        st.stop()
+
+    with st.expander("⚙️ Innstillinger for denne runden (hvor mange går videre til neste runde, per klasse)"):
+        gjeldende_cutoff = hent_cutoff(sh, runde)
+        ic1, ic2, ic3, ic4 = st.columns([1,1,1,1])
+        al = ic1.number_input("Antall Liten →", min_value=0, value=gjeldende_cutoff["Liten"], key=f"cutoff_liten_{runde}")
+        am = ic2.number_input("Antall Medium →", min_value=0, value=gjeldende_cutoff["Medium"], key=f"cutoff_medium_{runde}")
+        ast = ic3.number_input("Antall Stor →", min_value=0, value=gjeldende_cutoff["Stor"], key=f"cutoff_stor_{runde}")
+        if ic4.button("Lagre innstilling"):
+            lagre_cutoff(sh, runde, al, am, ast)
+            st.success("Lagret!")
+
+    topp300_navn = st.session_state.get("_topp300_navn")
+    if not topp300_navn:
+        topp300_navn = sorted([v.get("name") for v in r.values() if v.get("status")=="inn" and not v.get("enk") and v.get("total") is not None], key=lambda n: r[n].get("total",0), reverse=True)[:300]
+
+    with st.spinner("Henter aktive butikker for denne runden..."):
+        aktive_navn = hent_aktive_butikker_for_runde(sh, r, runde, topp300_navn)
+        kriterier = hent_kriterier(sh, runde)
+        mine_vurderinger = {v["Butikk"] + "|" + v["Kriterium"]: v for v in hent_vurderinger(sh, runde) if v.get("Jurymedlem") == jurynavn}
+
+    if not kriterier:
+        st.warning(f"Ingen kriterier funnet for Runde {runde} i 'Kriterier'-arket. Legg dem til der (kolonner: Runde, Kategori, Kriterium, Rekkefolge).")
+        st.stop()
+
+    st.caption(f"{len(aktive_navn)} butikker aktive i denne runden.")
+    sok = st.text_input("🔍 Søk etter butikk", "")
+    vis_navn = [n for n in aktive_navn if sok.lower() in n.lower()] if sok else aktive_navn
+
+    forhandsvalgt = st.session_state.pop("_jury_valgt_butikk", None)
+    if forhandsvalgt and forhandsvalgt in vis_navn:
+        vis_navn = [forhandsvalgt] + [n for n in vis_navn if n != forhandsvalgt]
+
+    kategorier_gruppert = {}
+    for kat, krit in kriterier:
+        kategorier_gruppert.setdefault(kat, []).append(krit)
+
+    for navn in vis_navn[:30]:  # begrens antall vist samtidig for ytelse
+        butikk = r.get(navn, {})
+        alt_ferdig = all((navn + "|" + krit) in mine_vurderinger for _, krit in kriterier)
+        merke = "✅" if alt_ferdig else ""
+        with st.expander(f"{merke} **{navn}** — {butikk.get('orgform','–')} · {butikk.get('bransje','–')} · {butikk.get('klasse','–')}"):
+            st.markdown(f"**Beskrivelse:** {butikk.get('kommentar','Ingen beskrivelse tilgjengelig.')}")
+            bc1, bc2 = st.columns(2)
+            if butikk.get("url"):
+                bc1.markdown(f'🌐 [Besøk nettbutikk]({butikk["url"]})')
+            bc2.markdown(f'[📊 Åpne i Google Sheets]({lag_sheet_lenke(sh, navn, runde)})')
+            st.markdown("---")
+            for kat, kriterieliste in kategorier_gruppert.items():
+                st.markdown(f"**{kat}**")
+                for krit in kriterieliste:
+                    eksisterende = mine_vurderinger.get(navn + "|" + krit, {})
+                    kc1, kc2 = st.columns([1, 3])
+                    with kc1:
+                        score = st.select_slider(krit, [1,2,3,4,5], value=int(eksisterende.get("Score", 3) or 3), format_func=lambda x: "⭐"*x, key=f"jscore_{navn}_{krit}", label_visibility="collapsed")
+                    with kc2:
+                        kommentar = st.text_input("Kommentar", value=eksisterende.get("Kommentar",""), key=f"jkom_{navn}_{krit}", label_visibility="collapsed", placeholder=krit)
+                    if st.session_state.get(f"_lagret_{navn}_{krit}"):
+                        pass
+            if st.button("💾 Lagre alle vurderinger for denne butikken", key=f"jlagre_{navn}"):
+                for kat, kriterieliste in kategorier_gruppert.items():
+                    for krit in kriterieliste:
+                        score = st.session_state.get(f"jscore_{navn}_{krit}", 3)
+                        kommentar = st.session_state.get(f"jkom_{navn}_{krit}", "")
+                        lagre_vurdering(sh, navn, jurynavn, runde, kat, krit, score, kommentar)
+                st.success(f"Lagret vurderinger for {navn}!")
+                st.rerun()
+
+elif side == "🏆 Finale":
+    st.header("🏆 Finale – basert på jury sin vurdering (Runde 3)")
+    if not st.session_state.resultater:
+        st.info("Last opp resultater.json i sidepanelet.")
+        st.stop()
+    r = st.session_state.resultater
+    sh = koble_gsheets()
+    if not sh:
+        st.error("Kunne ikke koble til Google Sheets.")
+        st.stop()
+
+    vurderinger_r3 = hent_vurderinger(sh, 3)
+    if not vurderinger_r3:
+        st.info("Ingen vurderinger registrert for Runde 3 ennå. Finalister vises her når juryen har vurdert i Runde 3.")
+        st.stop()
+
+    snitt = beregn_snittscore_per_butikk(vurderinger_r3)
+    finalister = sorted(snitt.items(), key=lambda x: x[1], reverse=True)
+
+    for i, (navn, score) in enumerate(finalister):
+        butikk = r.get(navn, {})
+        c, bg = score_farge(score)
+        st.markdown(
+            f'<div style="background:white;border-radius:12px;padding:20px 24px;margin-bottom:14px;border-left:5px solid {c};box-shadow:0 1px 6px rgba(0,0,0,0.08)">'
+            f'<div style="display:flex;align-items:center;gap:16px">'
+            f'<span style="font-size:24px;font-weight:700;color:{c}">🏆 {i+1}</span>'
+            f'<div style="flex:1"><div style="font-size:17px;font-weight:700">{navn}</div>'
+            f'<div style="font-size:13px;color:#C8102E">{butikk.get("url","")}</div></div>'
+            f'<div style="text-align:right"><div style="font-weight:700;color:{c};font-size:22px">{score}</div>'
+            f'<div style="font-size:11px;color:#999">jury-snitt</div></div></div></div>',
+            unsafe_allow_html=True
+        )
 
 elif side == "📦 Logistikk":
     st.header("📦 Logistikkrapport – Posten Bring")
@@ -799,28 +989,32 @@ elif side == "ℹ️ Informasjon":
     | **Medium** | 50–250 mill kr |
     | **Stor** | Over 250 mill kr |
 
-    ### Scoringsmodell – 4 kategorier, 25% vekt hver
+    ### Scoringsmodell – 3 kategorier, 33% vekt hver
     | Kategori | Vekt | Kriterier |
     |---|---|---|
-    | Første inntrykk | 25% | Startside (25%), Bilder/film (25%), Produktinfo (25%), Søk (25%) |
-    | Info, kundeservice og bærekraft | 25% | KLR 35%, Kundeservice 35%, Bærekraft 30% |
-    | Kassen, mersalg og inspirasjon | 25% | Kassen 50%, Mersalg 25%, Inspirasjon 25% |
-    | Markedsføring og kundedialog | 25% | SoMe 40%, Kundeklubb 30% (dynamisk), Nyhetsbrev 30% |
+    | Første inntrykk | 33% | Startside, Bilder/film, Produktinfo, Søk – alle 25% hver innad |
+    | Info, kundeservice og bærekraft | 33% | Kjøpsvilkår/levering/retur 40%, Kundeservice 40%, Bærekraft 20% |
+    | Markedsføring og kundedialog | 33% | Kun sosiale medier gir poengsum (100%) |
 
-    **Kjøpsvilkår, levering og retur (35% av IKS):**
+    **Kjøpsvilkår, levering og retur (40% av IKS):**
     Kjøpsvilkår 20% · Levering 40% · Retur 40%
 
-    **Kassen (50% av Kassen/Mersalg):**
-    Innlogging 20% · Leveringsvalg 30% · Leveringspris 20% · Leveringstid 15% · Betaling 15%
-
-    **Kundeklubb-scoring:**
-    2 = Ingen kundeklubb · 3 = Kun inngangsrabatt · 4 = Poeng/rabatter · 5 = Full lojalitetspakke
+    **Kundeklubb og nyhetsbrev:** vurderes som ja/nei + beskrivelse, gir IKKE poengsum – vises som ⭐ i appen.
 
     **NB:** Stor-klassen bedømmes strengere enn Medium og Liten.
 
-    ### KO-kriterier
-    - ENK (Enkeltmannsforetak) – filtreres automatisk ut
-    - Ingen URL funnet – kan ikke identifiseres
+    ### Fjernet fra vurderingen
+    - **Kassen/Mersalg/Inspirasjon** – fjernet som eget kriterium. Automatisert testing av selve
+      checkout-flyten ga for vage/upålitelige resultater til å inngå i totalscoren.
+    - **Trustpilot-oppslag** – fjernet, ikke lenger en del av vurderingen.
+    - **Mobilvennlighet** – fjernet tidligere, testes ikke lenger.
 
-    ### Versjon 7.0 · August 2026 · Posten Bring
+    ### Portvokterkriterier
+    - **ENK (Enkeltmannsforetak)** – filtreres automatisk ut
+    - **Ingen URL funnet** – kan ikke identifiseres, filtreres ut
+    - **Ikke en fungerende nettbutikk** – rene informasjonssider uten kjøpsfunksjon filtreres ut
+    - **Kjøpsvilkår ikke funnet** – flagges for manuell sjekk (filtreres IKKE automatisk ut lenger,
+      for å unngå at seriøse butikker feilaktig ekskluderes pga. bot-beskyttelse)
+
+    ### Versjon 8.0 · August 2026 · Posten Bring
     """)
