@@ -238,13 +238,37 @@ def hent_aktive_butikker_for_runde(sh, resultater: dict, runde: int, topp300_nav
     return aktive
 
 
+def sikre_oversikt_seedet(sh, resultater: dict, topp300_navn: list):
+    """Fyller 'Oversikt'-fanen med alle butikkene i Topp 300 automatisk, slik at arket
+    ser ferdig strukturert ut fra første stund – ikke bare tomt til noen scorer noe."""
+    ws = hent_eller_lag_ark(sh, "Oversikt", ["Butikk", "URL", "Org.form", "Bransje", "Klasse", "Beskrivelse"])
+    eksisterende = set()
+    alle = ws.get_all_values()
+    if len(alle) > 1:
+        eksisterende = {rad[0] for rad in alle[1:] if rad}
+    nye_rader = []
+    for navn in topp300_navn:
+        if navn in eksisterende:
+            continue
+        b = resultater.get(navn, {})
+        nye_rader.append([
+            navn, b.get("url", ""), b.get("orgform", ""), b.get("bransje", ""),
+            b.get("klasse", ""), b.get("kommentar", "")[:300],
+        ])
+    if nye_rader:
+        ws.append_rows(nye_rader)
+    return ws
+
+
 def lag_sheet_lenke(sh, butikk_navn: str, runde: int) -> str:
-    """Prøver å finne butikkens rad i Vurderinger-arket og lage en direktelenke dit."""
+    """Lager en direktelenke til butikkens rad i Oversikt-fanen (alltid utfylt, i motsetning
+    til Vurderinger som kun har rader for butikker som faktisk er scoret)."""
     try:
-        ws = hent_vurderinger_ark(sh)
+        ws = sh.worksheet("Oversikt")
         celle = ws.find(butikk_navn)
         if celle:
             return f"https://docs.google.com/spreadsheets/d/{sh.id}/edit#gid={ws.id}&range=A{celle.row}"
+        return f"https://docs.google.com/spreadsheets/d/{sh.id}/edit#gid={ws.id}"
     except Exception:
         pass
     return f"https://docs.google.com/spreadsheets/d/{sh.id}/edit"
@@ -714,6 +738,11 @@ elif side == "⭐ Topp 300":
     klasse_tab = st.radio("Vis", ["Alle","Liten","Medium","Stor"], horizontal=True)
     vis_liste = {"Liten":liten,"Medium":medium,"Stor":stor}.get(klasse_tab, alle_topp)
     st.markdown("---")
+
+    def _hopp_til_jury(navn_valgt):
+        st.session_state["_jury_valgt_butikk"] = navn_valgt
+        st.session_state.nav_side = "🧑‍⚖️ Jury"
+
     for butikk in vis_liste:
         navn = butikk.get("name","")
         c1, c2 = st.columns([4,1])
@@ -721,10 +750,7 @@ elif side == "⭐ Topp 300":
             st.markdown(f"**{navn}** — {butikk.get('klasse','')} · {butikk.get('bransje','–')}")
             if butikk.get("url"): st.caption(f'🌐 {butikk["url"]}')
         with c2:
-            if st.button("🧑‍⚖️ Til jury", key=f"tj300_{navn}"):
-                st.session_state["_jury_valgt_butikk"] = navn
-                st.session_state.nav_side = "🧑‍⚖️ Jury"
-                st.rerun()
+            st.button("🧑‍⚖️ Til jury", key=f"tj300_{navn}", on_click=_hopp_til_jury, args=(navn,))
         st.markdown("---")
 
 elif side == "🧑‍⚖️ Jury":
@@ -767,6 +793,7 @@ elif side == "🧑‍⚖️ Jury":
         topp300_navn = sorted([v.get("name") for v in r.values() if v.get("status")=="inn" and not v.get("enk") and v.get("total") is not None], key=lambda n: r[n].get("total",0), reverse=True)[:300]
 
     with st.spinner("Henter aktive butikker for denne runden..."):
+        sikre_oversikt_seedet(sh, r, topp300_navn)
         aktive_navn = hent_aktive_butikker_for_runde(sh, r, runde, topp300_navn)
         kriterier = hent_kriterier(sh, runde)
         mine_vurderinger = {v["Butikk"] + "|" + v["Kriterium"]: v for v in hent_vurderinger(sh, runde) if v.get("Jurymedlem") == jurynavn}
