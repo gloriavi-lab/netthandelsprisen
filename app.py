@@ -170,10 +170,16 @@ def hent_vurderinger_ark(sh):
         try:
             ws.format("A1:H1", {"backgroundColor": {"red": 0.784, "green": 0.063, "blue": 0.184}, "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}}})
             ws.freeze(rows=1)
+            # Skjules som standard – dette er en rå datalogg for appen, ikke ment å leses
+            # direkte. "Rangering" og "Oversikt" er de fanene dere faktisk skal bruke.
+            # (Navnet på selve fanen endres IKKE, kun synligheten – ellers ville koden
+            # laget en ny, tom "Vurderinger"-fane ved neste gang siden lastes.)
+            ws.hide()
         except Exception:
             pass
         st.session_state["_vurderinger_formatert"] = True
     return ws
+
 
 
 @st.cache_data(ttl=20, show_spinner=False)
@@ -287,6 +293,25 @@ def formater_oversikt_ark(ws):
     st.session_state["_oversikt_formatert"] = True
 
 
+def ordne_faner(sh):
+    """Sorterer fanerekkefølgen slik at de fanene dere faktisk skal se på (Oversikt,
+    Kriterier, Innstillinger, Rangering) kommer først, og den skjulte rådata-loggen
+    (Vurderinger) havner sist. Kjøres kun én gang per økt."""
+    if st.session_state.get("_faner_ordnet"):
+        return
+    rekkefolge = ["Oversikt", "Kriterier", "Innstillinger", "Rangering", "Vurderinger"]
+    try:
+        for i, navn in enumerate(rekkefolge):
+            try:
+                ws = sh.worksheet(navn)
+                ws.update_index(i)
+            except gspread.WorksheetNotFound:
+                continue
+    except Exception:
+        pass
+    st.session_state["_faner_ordnet"] = True
+
+
 def sikre_oversikt_seedet(sh, resultater: dict, topp300_navn: list):
     """Fyller 'Oversikt'-fanen med alle butikkene i Topp 300 automatisk, slik at arket
     ser ferdig strukturert ut fra første stund – ikke bare tomt til noen scorer noe.
@@ -335,23 +360,14 @@ def _kolonnebokstav(n: int) -> str:
 
 def bygg_rangeringsvisning(sh, runde: int, resultater: dict, aktive_navn: list):
     """
-    Bygger en 'Rangering'-fane som visuelt speiler fjorårets Excel-oppsett: kategorier som
-    sammenslåtte, fargede overskriftsceller som spenner over sine underkriterier, én rad per
-    butikk sortert etter snittscore. Genereres på nytt hver gang funksjonen kalles (manuelt
-    trigget via knapp i appen – IKKE automatisk ved hver interaksjon, for å skåne API-kvoten).
+    Bygger en 'Rangering'-fane med LEVENDE Google Sheets-formler (AVERAGEIFS) som regner
+    seg ut på nytt automatisk – enten data legges inn via appen eller direkte i
+    'Vurderinger'-fanen. Selve OPPSETTET (kategorier, kolonner, rekkefølge på butikker)
+    settes én gang når knappen trykkes – men TALLENE oppdaterer seg selv etterpå.
     """
     kriterier = hent_kriterier(sh, runde)
     if not kriterier:
         return None
-
-    vurderinger = hent_vurderinger(sh, runde)
-    from collections import defaultdict
-    snitt_per_butikk_kriterium = defaultdict(list)
-    for v in vurderinger:
-        try:
-            snitt_per_butikk_kriterium[(v["Butikk"], v["Kriterium"])].append(float(v["Score"]))
-        except (ValueError, KeyError):
-            continue
 
     kategorier_gruppert = {}
     for kat, krit in kriterier:
@@ -373,26 +389,33 @@ def bygg_rangeringsvisning(sh, runde: int, resultater: dict, aktive_navn: list):
     rad1.append("Snitt totalt")
     rad2.append("")
 
-    # Databader – én per butikk, sortert etter snitt
+    def _escape(tekst: str) -> str:
+        return tekst.replace('"', '""')
+
+    # Databader – én per butikk, med LEVENDE FORMLER (ikke ferdigberegnede tall).
+    # "Vurderinger!" viser til den skjulte rådata-fanen – formlene virker uansett om
+    # den er skjult, og oppdaterer seg selv når noen legger inn nye vurderinger der.
     databader = []
     for navn in aktive_navn:
+        navn_escaped = _escape(navn)
         rad = [navn]
-        alle_snitt = []
+        kolonne_bokstaver = []
         for kat, kriterieliste in kategorier_gruppert.items():
             for krit in kriterieliste:
-                verdier = snitt_per_butikk_kriterium.get((navn, krit), [])
-                if verdier:
-                    snitt = round(sum(verdier) / len(verdier), 1)
-                    rad.append(snitt)
-                    alle_snitt.append(snitt)
-                else:
-                    rad.append("")
-        totalsnitt = round(sum(alle_snitt) / len(alle_snitt), 2) if alle_snitt else ""
-        rad.append(totalsnitt)
-        databader.append((totalsnitt if totalsnitt != "" else -1, rad))
+                krit_escaped = _escape(krit)
+                formel = (
+                    f'=IFERROR(AVERAGEIFS(Vurderinger!$F$2:$F$100000,'
+                    f'Vurderinger!$A$2:$A$100000,"{navn_escaped}",'
+                    f'Vurderinger!$C$2:$C$100000,{runde},'
+                    f'Vurderinger!$E$2:$E$100000,"{krit_escaped}"),"")'
+                )
+                rad.append(formel)
+        databader.append(rad)
 
-    databader.sort(key=lambda x: x[0], reverse=True)
-    alle_rader = [rad1, rad2] + [rad for _, rad in databader]
+    # "Snitt totalt"-kolonnen: gjennomsnitt av kriterie-cellene på SAMME rad (ekte formel,
+    # regnes ut når arket faktisk skrives siden radnummeret da er kjent)
+    antall_kriterie_kolonner = len(rad1) - 2  # minus "Butikk" og "Snitt totalt"
+    alle_rader = [rad1, rad2] + databader
 
     try:
         try:
@@ -401,7 +424,17 @@ def bygg_rangeringsvisning(sh, runde: int, resultater: dict, aktive_navn: list):
         except gspread.WorksheetNotFound:
             ws = sh.add_worksheet(title="Rangering", rows=len(alle_rader) + 10, cols=len(rad1) + 2)
 
-        ws.update("A1", alle_rader)
+        ws.update("A1", alle_rader, value_input_option="USER_ENTERED")  # USER_ENTERED = tolkes som formler, ikke ren tekst
+
+        # Legg til "Snitt totalt"-formel per rad NÅ som radnumrene er kjent
+        siste_kriterie_kol = _kolonnebokstav(antall_kriterie_kolonner)
+        totalkol = _kolonnebokstav(antall_kriterie_kolonner + 1)
+        totalformler = []
+        for i in range(len(databader)):
+            radnr = i + 3  # rad 1-2 er header, data starter rad 3
+            totalformler.append([f'=IFERROR(AVERAGE(B{radnr}:{siste_kriterie_kol}{radnr}),"")'])
+        if totalformler:
+            ws.update(f"{totalkol}3", totalformler, value_input_option="USER_ENTERED")
 
         # Fjern gamle sammenslåinger før nye legges til (unngår feil ved gjentatt kjøring)
         try:
@@ -990,6 +1023,7 @@ elif side == "🧑‍⚖️ Jury":
 
     with st.spinner("Henter aktive butikker for denne runden..."):
         sikre_oversikt_seedet(sh, r, topp300_navn)
+        ordne_faner(sh)
         aktive_navn = hent_aktive_butikker_for_runde(sh, r, runde, topp300_navn)
         kriterier = hent_kriterier(sh, runde)
         mine_vurderinger = {v["Butikk"] + "|" + v["Kriterium"]: v for v in hent_vurderinger(sh, runde) if v.get("Jurymedlem") == jurynavn}
