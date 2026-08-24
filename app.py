@@ -361,9 +361,12 @@ def _kolonnebokstav(n: int) -> str:
 def bygg_rangeringsvisning(sh, runde: int, resultater: dict, aktive_navn: list):
     """
     Bygger en 'Rangering'-fane med LEVENDE Google Sheets-formler (AVERAGEIFS) som regner
-    seg ut på nytt automatisk – enten data legges inn via appen eller direkte i
-    'Vurderinger'-fanen. Selve OPPSETTET (kategorier, kolonner, rekkefølge på butikker)
-    settes én gang når knappen trykkes – men TALLENE oppdaterer seg selv etterpå.
+    seg ut på nytt automatisk – enten data legges inn via appen eller direkte i den
+    skjulte 'Vurderinger'-fanen. To ting som feilet forrige forsøk er fikset:
+    1) Skilletegn i formler (, vs ;) velges nå basert på ARKETS FAKTISKE språkinnstilling
+       (sh.locale), i stedet for å anta amerikansk stil.
+    2) Bruker HELE kolonner (F:F) i stedet for et fast radintervall (F2:F100000) – et
+       slikt intervall feiler hvis Vurderinger-arket har færre rader enn det referert til.
     """
     kriterier = hent_kriterier(sh, runde)
     if not kriterier:
@@ -389,31 +392,32 @@ def bygg_rangeringsvisning(sh, runde: int, resultater: dict, aktive_navn: list):
     rad1.append("Snitt totalt")
     rad2.append("")
 
+    # Finn riktig skilletegn basert på arkets FAKTISKE språkinnstilling – ikke en antakelse
+    try:
+        locale = (sh.locale or "en_US").lower()
+    except Exception:
+        locale = "en_us"
+    skilletegn = ";" if not locale.startswith("en") else ","
+
     def _escape(tekst: str) -> str:
         return tekst.replace('"', '""')
 
-    # Databader – én per butikk, med LEVENDE FORMLER (ikke ferdigberegnede tall).
-    # "Vurderinger!" viser til den skjulte rådata-fanen – formlene virker uansett om
-    # den er skjult, og oppdaterer seg selv når noen legger inn nye vurderinger der.
     databader = []
     for navn in aktive_navn:
         navn_escaped = _escape(navn)
         rad = [navn]
-        kolonne_bokstaver = []
         for kat, kriterieliste in kategorier_gruppert.items():
             for krit in kriterieliste:
                 krit_escaped = _escape(krit)
                 formel = (
-                    f'=IFERROR(AVERAGEIFS(Vurderinger!$F$2:$F$100000,'
-                    f'Vurderinger!$A$2:$A$100000,"{navn_escaped}",'
-                    f'Vurderinger!$C$2:$C$100000,{runde},'
-                    f'Vurderinger!$E$2:$E$100000,"{krit_escaped}"),"")'
+                    f'=IFERROR(AVERAGEIFS(Vurderinger!F:F{skilletegn}'
+                    f'Vurderinger!A:A{skilletegn}"{navn_escaped}"{skilletegn}'
+                    f'Vurderinger!C:C{skilletegn}{runde}{skilletegn}'
+                    f'Vurderinger!E:E{skilletegn}"{krit_escaped}"){skilletegn}"")'
                 )
                 rad.append(formel)
         databader.append(rad)
 
-    # "Snitt totalt"-kolonnen: gjennomsnitt av kriterie-cellene på SAMME rad (ekte formel,
-    # regnes ut når arket faktisk skrives siden radnummeret da er kjent)
     antall_kriterie_kolonner = len(rad1) - 2  # minus "Butikk" og "Snitt totalt"
     alle_rader = [rad1, rad2] + databader
 
@@ -424,15 +428,14 @@ def bygg_rangeringsvisning(sh, runde: int, resultater: dict, aktive_navn: list):
         except gspread.WorksheetNotFound:
             ws = sh.add_worksheet(title="Rangering", rows=len(alle_rader) + 10, cols=len(rad1) + 2)
 
-        ws.update("A1", alle_rader, value_input_option="USER_ENTERED")  # USER_ENTERED = tolkes som formler, ikke ren tekst
+        ws.update("A1", alle_rader, value_input_option="USER_ENTERED")  # USER_ENTERED = tolkes som formler
 
-        # Legg til "Snitt totalt"-formel per rad NÅ som radnumrene er kjent
         siste_kriterie_kol = _kolonnebokstav(antall_kriterie_kolonner)
         totalkol = _kolonnebokstav(antall_kriterie_kolonner + 1)
         totalformler = []
         for i in range(len(databader)):
             radnr = i + 3  # rad 1-2 er header, data starter rad 3
-            totalformler.append([f'=IFERROR(AVERAGE(B{radnr}:{siste_kriterie_kol}{radnr}),"")'])
+            totalformler.append([f'=IFERROR(AVERAGE(B{radnr}:{siste_kriterie_kol}{radnr}){skilletegn}"")'])
         if totalformler:
             ws.update(f"{totalkol}3", totalformler, value_input_option="USER_ENTERED")
 
@@ -1034,11 +1037,20 @@ elif side == "🧑‍⚖️ Jury":
 
     st.caption(f"{len(aktive_navn)} butikker aktive i denne runden.")
 
+    # Automatisk oppdatering av Rangering-fanen, men maks én gang hvert 90. sekund –
+    # gir en "levende følelse" uten å risikere samme kvote-problem som tidligere
+    import time as _time
+    siste_oppdatering = st.session_state.get("_rangering_siste_oppdatering", 0)
+    if _time.time() - siste_oppdatering > 90:
+        bygg_rangeringsvisning(sh, runde, r, aktive_navn)
+        st.session_state["_rangering_siste_oppdatering"] = _time.time()
+
     rc1, rc2 = st.columns([2, 1])
     with rc2:
-        if st.button("🎨 Oppdater ryddig oversikt i Google Sheets", help="Bygger en fane med samme struktur som fjorårets ark – kategorier som spenner over kolonner. Kjør denne når dere vil se en oppdatert oversikt, ikke automatisk."):
+        if st.button("🎨 Oppdater ryddig oversikt nå", help="Selve TALLENE i Rangering oppdaterer seg allerede automatisk (levende formler) uansett. Denne knappen bygger kun oppsettet på nytt hvis listen over aktive butikker har endret seg."):
             with st.spinner("Bygger rangeringsvisning..."):
                 resultat_ws = bygg_rangeringsvisning(sh, runde, r, aktive_navn)
+                st.session_state["_rangering_siste_oppdatering"] = _time.time()
             if resultat_ws:
                 st.success(f"✅ Ferdig! Se fanen 'Rangering' i Google Sheets.")
             else:
