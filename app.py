@@ -137,18 +137,24 @@ def sikre_kriterier_seedet(sh):
     if len(ws.get_all_values()) <= 1:
         rader = [[1, kat, krit, rekkefolge] for kat, krit, rekkefolge in STANDARD_KRITERIER_RUNDE1]
         ws.append_rows(rader)
-    try:
-        ws.format("A1:D1", {"backgroundColor": {"red": 0.784, "green": 0.063, "blue": 0.184}, "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}}})
-        ws.freeze(rows=1)
-        ws.columns_auto_resize(0, 3)
-    except Exception:
-        pass
+    # VIKTIG: formatering kjøres KUN én gang per nettleserøkt, ikke ved hver eneste
+    # interaksjon – ellers sprenges Google sin grense på API-kall per minutt raskt.
+    if not st.session_state.get("_kriterier_formatert"):
+        try:
+            ws.format("A1:D1", {"backgroundColor": {"red": 0.784, "green": 0.063, "blue": 0.184}, "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}}})
+            ws.freeze(rows=1)
+            ws.columns_auto_resize(0, 3)
+        except Exception:
+            pass
+        st.session_state["_kriterier_formatert"] = True
     return ws
 
 
-def hent_kriterier(sh, runde: int) -> list:
-    """Returnerer [(kategori, kriterium), ...] for en gitt runde, i riktig rekkefølge."""
-    ws = sikre_kriterier_seedet(sh)
+@st.cache_data(ttl=30, show_spinner=False)
+def hent_kriterier(_sh, runde: int) -> list:
+    """Returnerer [(kategori, kriterium), ...] for en gitt runde. Mellomlagres i 30 sek
+    for å unngå at samme data hentes på nytt ved hver eneste interaksjon i appen."""
+    ws = sikre_kriterier_seedet(_sh)
     rader = ws.get_all_records()
     filtrert = [r for r in rader if str(r.get("Runde")) == str(runde)]
     filtrert.sort(key=lambda r: r.get("Rekkefolge", 0))
@@ -157,16 +163,19 @@ def hent_kriterier(sh, runde: int) -> list:
 
 def hent_vurderinger_ark(sh):
     ws = hent_eller_lag_ark(sh, "Vurderinger", ["Butikk", "Jurymedlem", "Runde", "Kategori", "Kriterium", "Score", "Kommentar", "Tidsstempel"])
-    try:
-        ws.format("A1:H1", {"backgroundColor": {"red": 0.784, "green": 0.063, "blue": 0.184}, "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}}})
-        ws.freeze(rows=1)
-    except Exception:
-        pass
+    if not st.session_state.get("_vurderinger_formatert"):
+        try:
+            ws.format("A1:H1", {"backgroundColor": {"red": 0.784, "green": 0.063, "blue": 0.184}, "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}}})
+            ws.freeze(rows=1)
+        except Exception:
+            pass
+        st.session_state["_vurderinger_formatert"] = True
     return ws
 
 
-def hent_vurderinger(sh, runde: int, butikk: str = None) -> list:
-    ws = hent_vurderinger_ark(sh)
+@st.cache_data(ttl=20, show_spinner=False)
+def hent_vurderinger(_sh, runde: int, butikk: str = None) -> list:
+    ws = hent_vurderinger_ark(_sh)
     rader = ws.get_all_records()
     rader = [r for r in rader if str(r.get("Runde")) == str(runde)]
     if butikk:
@@ -183,8 +192,10 @@ def lagre_vurdering(sh, butikk, jurymedlem, runde, kategori, kriterium, score, k
     for i, rad in enumerate(alle[1:], start=2):  # rad 1 er header
         if len(rad) >= 5 and rad[0] == butikk and rad[1] == jurymedlem and str(rad[2]) == str(runde) and rad[4] == kriterium:
             ws.update(f"F{i}:H{i}", [[score, kommentar, tidsstempel]])
+            hent_vurderinger.clear()  # tøm mellomlager slik at endringen vises umiddelbart
             return i
     ws.append_row([butikk, jurymedlem, runde, kategori, kriterium, score, kommentar, tidsstempel])
+    hent_vurderinger.clear()
     return len(alle) + 1
 
 
@@ -204,9 +215,10 @@ def hent_innstillinger_ark(sh):
     return hent_eller_lag_ark(sh, "Innstillinger", ["Runde", "AntallLiten", "AntallMedium", "AntallStor"])
 
 
-def hent_cutoff(sh, runde: int) -> dict:
+@st.cache_data(ttl=30, show_spinner=False)
+def hent_cutoff(_sh, runde: int) -> dict:
     """Antall butikker per klasse som går videre FRA denne runden. Standardverdier hvis ikke satt."""
-    ws = hent_innstillinger_ark(sh)
+    ws = hent_innstillinger_ark(_sh)
     rader = ws.get_all_records()
     for r in rader:
         if str(r.get("Runde")) == str(runde):
@@ -220,8 +232,10 @@ def lagre_cutoff(sh, runde: int, antall_liten, antall_medium, antall_stor):
     for i, rad in enumerate(alle[1:], start=2):
         if len(rad) >= 1 and str(rad[0]) == str(runde):
             ws.update(f"B{i}:D{i}", [[antall_liten, antall_medium, antall_stor]])
+            hent_cutoff.clear()
             return
     ws.append_row([runde, antall_liten, antall_medium, antall_stor])
+    hent_cutoff.clear()
 
 
 def hent_aktive_butikker_for_runde(sh, resultater: dict, runde: int, topp300_navn: list) -> list:
@@ -252,7 +266,9 @@ def hent_aktive_butikker_for_runde(sh, resultater: dict, runde: int, topp300_nav
 
 def formater_oversikt_ark(ws):
     """Gir Oversikt-arket et ryddig, profesjonelt utseende – farget overskrift, frosset
-    toppmeny, tilpassede kolonnebredder. Kjøres kun én gang (trygt å kjøre flere ganger)."""
+    toppmeny, tilpassede kolonnebredder. Kjøres kun én gang per nettleserøkt."""
+    if st.session_state.get("_oversikt_formatert"):
+        return
     try:
         ws.format("A1:F1", {
             "backgroundColor": {"red": 0.784, "green": 0.063, "blue": 0.184},  # Posten-rød
@@ -265,15 +281,18 @@ def formater_oversikt_ark(ws):
         ws.format("F2:F1000", {"wrapStrategy": "WRAP", "verticalAlignment": "TOP"})
     except Exception:
         pass  # formatering er kun kosmetisk – la ikke dette stoppe selve funksjonaliteten
+    st.session_state["_oversikt_formatert"] = True
 
 
 def sikre_oversikt_seedet(sh, resultater: dict, topp300_navn: list):
     """Fyller 'Oversikt'-fanen med alle butikkene i Topp 300 automatisk, slik at arket
-    ser ferdig strukturert ut fra første stund – ikke bare tomt til noen scorer noe."""
+    ser ferdig strukturert ut fra første stund – ikke bare tomt til noen scorer noe.
+    Kjøres kun én gang per økt (samme grunn som formateringen over)."""
+    if st.session_state.get("_oversikt_seedet"):
+        return
     ws = hent_eller_lag_ark(sh, "Oversikt", ["Butikk", "URL", "Org.form", "Bransje", "Klasse", "Beskrivelse"])
     eksisterende = set()
     alle = ws.get_all_values()
-    var_tom = len(alle) <= 1
     if len(alle) > 1:
         eksisterende = {rad[0] for rad in alle[1:] if rad}
     nye_rader = []
@@ -288,6 +307,7 @@ def sikre_oversikt_seedet(sh, resultater: dict, topp300_navn: list):
     if nye_rader:
         ws.append_rows(nye_rader)
     formater_oversikt_ark(ws)
+    st.session_state["_oversikt_seedet"] = True
     return ws
 
 
