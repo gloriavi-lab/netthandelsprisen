@@ -108,8 +108,11 @@ STANDARD_KRITERIER_RUNDE1 = [
 KLASSER = ["Liten", "Medium", "Stor"]
 
 
+@st.cache_resource(ttl=3600, show_spinner=False)
 def koble_gsheets():
-    """Kobler til hele Google Sheet-et (ikke bare ett faneblad). Returnerer None ved feil."""
+    """Kobler til hele Google Sheet-et (ikke bare ett faneblad). Returnerer None ved feil.
+    Mellomlagres i 1 time – uten dette kobles det til Google på nytt ved HVER interaksjon
+    i appen, noe som raskt sprenger API-kvoten."""
     try:
         creds_info = st.secrets["gcp_service_account"]
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -435,15 +438,33 @@ def bygg_rangeringsvisning(sh, runde: int, resultater: dict, aktive_navn: list):
         return None
 
 
-def lag_sheet_lenke(sh, butikk_navn: str, runde: int) -> str:
-    """Lager en direktelenke til butikkens rad i Oversikt-fanen (alltid utfylt, i motsetning
-    til Vurderinger som kun har rader for butikker som faktisk er scoret)."""
+@st.cache_data(ttl=60, show_spinner=False)
+def hent_oversikt_radoppslag(_sh) -> dict:
+    """Bygger ett oppslag butikknavn -> radnummer i Oversikt-fanen med ETT API-kall,
+    i stedet for at hver butikk gjør sitt eget ws.find()-kall (som raskt sprenger kvoten
+    når 30 butikker vises samtidig)."""
     try:
-        ws = sh.worksheet("Oversikt")
-        celle = ws.find(butikk_navn)
-        if celle:
-            return f"https://docs.google.com/spreadsheets/d/{sh.id}/edit#gid={ws.id}&range=A{celle.row}"
-        return f"https://docs.google.com/spreadsheets/d/{sh.id}/edit#gid={ws.id}"
+        ws = _sh.worksheet("Oversikt")
+        alle = ws.get_all_values()
+        return {rad[0]: i + 1 for i, rad in enumerate(alle) if rad}  # 1-indeksert radnummer
+    except Exception:
+        return {}
+
+
+def lag_sheet_lenke(sh, butikk_navn: str, runde: int) -> str:
+    """Lager en direktelenke til butikkens rad i Oversikt-fanen, basert på ett mellomlagret
+    oppslag i stedet for ett API-kall per butikk."""
+    try:
+        oppslag = hent_oversikt_radoppslag(sh)
+        radnummer = oppslag.get(butikk_navn)
+        ws_id = st.session_state.get("_oversikt_gid")
+        if ws_id is None:
+            ws = sh.worksheet("Oversikt")
+            ws_id = ws.id
+            st.session_state["_oversikt_gid"] = ws_id
+        if radnummer:
+            return f"https://docs.google.com/spreadsheets/d/{sh.id}/edit#gid={ws_id}&range=A{radnummer}"
+        return f"https://docs.google.com/spreadsheets/d/{sh.id}/edit#gid={ws_id}"
     except Exception:
         pass
     return f"https://docs.google.com/spreadsheets/d/{sh.id}/edit"
