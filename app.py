@@ -42,6 +42,15 @@ div[data-testid="stExpander"] { background-color: white; border-radius: 8px; }
 .crit-name { font-size: 13px; font-weight: 700; color: #1A1A1A; margin-bottom: 6px; }
 .crit-beg { font-size: 12px; color: #333; line-height: 1.6; }
 .crit-vekt { font-size: 11px; color: #aaa; margin-top: 4px; font-style: italic; }
+/* "Hopp til butikk"-søkefeltet i sidepanelet – tydelig mørkere bakgrunn for bedre synlighet */
+section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[data-baseweb="select"] > div {
+    background-color: #3A3A3A !important;
+    color: #FFFFFF !important;
+    border-radius: 6px !important;
+}
+section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[data-baseweb="select"] > div * {
+    color: #FFFFFF !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -377,10 +386,10 @@ def bygg_rangeringsvisning(sh, runde: int, resultater: dict, aktive_navn: list):
         kategorier_gruppert.setdefault(kat, []).append(krit)
 
     # Header-rader
-    rad1 = ["Butikk"]  # kategori-navn, sammenslått over sine kolonner
-    rad2 = [""]        # underkriterium-navn
+    rad1 = ["Butikk", "", ""]  # kategori-navn, sammenslått over sine kolonner (Klasse/URL har ingen kategori)
+    rad2 = ["", "Klasse", "URL"]        # underkriterium-navn
     kategori_spenn = []  # (start_kol, slutt_kol, kategori) for sammenslåing
-    kol = 1
+    kol = 3
     for kat, kriterieliste in kategorier_gruppert.items():
         start = kol
         for krit in kriterieliste:
@@ -405,7 +414,8 @@ def bygg_rangeringsvisning(sh, runde: int, resultater: dict, aktive_navn: list):
     databader = []
     for navn in aktive_navn:
         navn_escaped = _escape(navn)
-        rad = [navn]
+        b = resultater.get(navn, {})
+        rad = [navn, b.get("klasse", ""), b.get("url", "")]
         for kat, kriterieliste in kategorier_gruppert.items():
             for krit in kriterieliste:
                 krit_escaped = _escape(krit)
@@ -418,7 +428,7 @@ def bygg_rangeringsvisning(sh, runde: int, resultater: dict, aktive_navn: list):
                 rad.append(formel)
         databader.append(rad)
 
-    antall_kriterie_kolonner = len(rad1) - 2  # minus "Butikk" og "Snitt totalt"
+    antall_kriterie_kolonner = len(rad1) - 4  # minus "Butikk", "Klasse", "URL" og "Snitt totalt"
     alle_rader = [rad1, rad2] + databader
 
     try:
@@ -430,12 +440,12 @@ def bygg_rangeringsvisning(sh, runde: int, resultater: dict, aktive_navn: list):
 
         ws.update("A1", alle_rader, value_input_option="USER_ENTERED")  # USER_ENTERED = tolkes som formler
 
-        siste_kriterie_kol = _kolonnebokstav(antall_kriterie_kolonner)
-        totalkol = _kolonnebokstav(antall_kriterie_kolonner + 1)
+        siste_kriterie_kol = _kolonnebokstav(antall_kriterie_kolonner + 2)  # +2 for Klasse/URL-forskyvning
+        totalkol = _kolonnebokstav(antall_kriterie_kolonner + 3)
         totalformler = []
         for i in range(len(databader)):
             radnr = i + 3  # rad 1-2 er header, data starter rad 3
-            totalformler.append([f'=IFERROR(AVERAGE(B{radnr}:{siste_kriterie_kol}{radnr}){skilletegn}"")'])
+            totalformler.append([f'=IFERROR(AVERAGE(D{radnr}:{siste_kriterie_kol}{radnr}){skilletegn}"")'])
         if totalformler:
             ws.update(f"{totalkol}3", totalformler, value_input_option="USER_ENTERED")
 
@@ -462,11 +472,13 @@ def bygg_rangeringsvisning(sh, runde: int, resultater: dict, aktive_navn: list):
             })
 
         siste_kol = _kolonnebokstav(len(rad1) - 1)
-        ws.format(f"A1:A2", {"backgroundColor": {"red": 0.2, "green": 0.2, "blue": 0.2}, "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}}})
-        ws.merge_cells(f"A1:A2")
+        # De tre identifiserende kolonnene (Butikk, Klasse, URL) – hver sin vertikalt sammenslåtte overskrift
+        for enkeltkol in ["A", "B", "C"]:
+            ws.format(f"{enkeltkol}1:{enkeltkol}2", {"backgroundColor": {"red": 0.2, "green": 0.2, "blue": 0.2}, "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}}})
+            ws.merge_cells(f"{enkeltkol}1:{enkeltkol}2")
         ws.format(f"{siste_kol}1:{siste_kol}2", {"backgroundColor": {"red": 0.2, "green": 0.2, "blue": 0.2}, "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}}})
         ws.merge_cells(f"{siste_kol}1:{siste_kol}2")
-        ws.freeze(rows=2, cols=1)
+        ws.freeze(rows=2, cols=3)
         ws.columns_auto_resize(0, len(rad1) - 1)
         return ws
     except Exception as e:
