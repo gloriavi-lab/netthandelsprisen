@@ -311,6 +311,130 @@ def sikre_oversikt_seedet(sh, resultater: dict, topp300_navn: list):
     return ws
 
 
+KATEGORI_FARGER = [
+    {"red": 0.784, "green": 0.063, "blue": 0.184},  # rød
+    {"red": 0.051, "green": 0.290, "blue": 0.541},  # blå
+    {"red": 0.106, "green": 0.420, "blue": 0.227},  # grønn
+    {"red": 0.478, "green": 0.176, "blue": 0.557},  # lilla
+    {"red": 0.910, "green": 0.490, "blue": 0.125},  # oransje
+]
+
+
+def _kolonnebokstav(n: int) -> str:
+    """0-indeksert kolonnenummer -> bokstav (0='A', 25='Z', 26='AA' osv.)."""
+    bokstav = ""
+    n += 1
+    while n > 0:
+        n, rest = divmod(n - 1, 26)
+        bokstav = chr(65 + rest) + bokstav
+    return bokstav
+
+
+def bygg_rangeringsvisning(sh, runde: int, resultater: dict, aktive_navn: list):
+    """
+    Bygger en 'Rangering'-fane som visuelt speiler fjorårets Excel-oppsett: kategorier som
+    sammenslåtte, fargede overskriftsceller som spenner over sine underkriterier, én rad per
+    butikk sortert etter snittscore. Genereres på nytt hver gang funksjonen kalles (manuelt
+    trigget via knapp i appen – IKKE automatisk ved hver interaksjon, for å skåne API-kvoten).
+    """
+    kriterier = hent_kriterier(sh, runde)
+    if not kriterier:
+        return None
+
+    vurderinger = hent_vurderinger(sh, runde)
+    from collections import defaultdict
+    snitt_per_butikk_kriterium = defaultdict(list)
+    for v in vurderinger:
+        try:
+            snitt_per_butikk_kriterium[(v["Butikk"], v["Kriterium"])].append(float(v["Score"]))
+        except (ValueError, KeyError):
+            continue
+
+    kategorier_gruppert = {}
+    for kat, krit in kriterier:
+        kategorier_gruppert.setdefault(kat, []).append(krit)
+
+    # Header-rader
+    rad1 = ["Butikk"]  # kategori-navn, sammenslått over sine kolonner
+    rad2 = [""]        # underkriterium-navn
+    kategori_spenn = []  # (start_kol, slutt_kol, kategori) for sammenslåing
+    kol = 1
+    for kat, kriterieliste in kategorier_gruppert.items():
+        start = kol
+        for krit in kriterieliste:
+            rad1.append("")
+            rad2.append(krit)
+            kol += 1
+        kategori_spenn.append((start, kol - 1, kat))
+        rad1[start] = kat
+    rad1.append("Snitt totalt")
+    rad2.append("")
+
+    # Databader – én per butikk, sortert etter snitt
+    databader = []
+    for navn in aktive_navn:
+        rad = [navn]
+        alle_snitt = []
+        for kat, kriterieliste in kategorier_gruppert.items():
+            for krit in kriterieliste:
+                verdier = snitt_per_butikk_kriterium.get((navn, krit), [])
+                if verdier:
+                    snitt = round(sum(verdier) / len(verdier), 1)
+                    rad.append(snitt)
+                    alle_snitt.append(snitt)
+                else:
+                    rad.append("")
+        totalsnitt = round(sum(alle_snitt) / len(alle_snitt), 2) if alle_snitt else ""
+        rad.append(totalsnitt)
+        databader.append((totalsnitt if totalsnitt != "" else -1, rad))
+
+    databader.sort(key=lambda x: x[0], reverse=True)
+    alle_rader = [rad1, rad2] + [rad for _, rad in databader]
+
+    try:
+        try:
+            ws = sh.worksheet("Rangering")
+            ws.clear()
+        except gspread.WorksheetNotFound:
+            ws = sh.add_worksheet(title="Rangering", rows=len(alle_rader) + 10, cols=len(rad1) + 2)
+
+        ws.update("A1", alle_rader)
+
+        # Fjern gamle sammenslåinger før nye legges til (unngår feil ved gjentatt kjøring)
+        try:
+            ws.unmerge_cells("A1:" + _kolonnebokstav(len(rad1) - 1) + "2")
+        except Exception:
+            pass
+
+        for i, (start, slutt, kat) in enumerate(kategori_spenn):
+            farge = KATEGORI_FARGER[i % len(KATEGORI_FARGER)]
+            omraade = f"{_kolonnebokstav(start)}1:{_kolonnebokstav(slutt)}1"
+            ws.merge_cells(omraade)
+            ws.format(omraade, {
+                "backgroundColor": farge,
+                "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
+                "horizontalAlignment": "CENTER",
+            })
+            underomraade = f"{_kolonnebokstav(start)}2:{_kolonnebokstav(slutt)}2"
+            ws.format(underomraade, {
+                "backgroundColor": {"red": 0.95, "green": 0.95, "blue": 0.95},
+                "textFormat": {"bold": True, "fontSize": 9},
+                "wrapStrategy": "WRAP",
+            })
+
+        siste_kol = _kolonnebokstav(len(rad1) - 1)
+        ws.format(f"A1:A2", {"backgroundColor": {"red": 0.2, "green": 0.2, "blue": 0.2}, "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}}})
+        ws.merge_cells(f"A1:A2")
+        ws.format(f"{siste_kol}1:{siste_kol}2", {"backgroundColor": {"red": 0.2, "green": 0.2, "blue": 0.2}, "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}}})
+        ws.merge_cells(f"{siste_kol}1:{siste_kol}2")
+        ws.freeze(rows=2, cols=1)
+        ws.columns_auto_resize(0, len(rad1) - 1)
+        return ws
+    except Exception as e:
+        st.session_state["_rangering_feil"] = str(e)
+        return None
+
+
 def lag_sheet_lenke(sh, butikk_navn: str, runde: int) -> str:
     """Lager en direktelenke til butikkens rad i Oversikt-fanen (alltid utfylt, i motsetning
     til Vurderinger som kun har rader for butikker som faktisk er scoret)."""
@@ -854,6 +978,17 @@ elif side == "🧑‍⚖️ Jury":
         st.stop()
 
     st.caption(f"{len(aktive_navn)} butikker aktive i denne runden.")
+
+    rc1, rc2 = st.columns([2, 1])
+    with rc2:
+        if st.button("🎨 Oppdater ryddig oversikt i Google Sheets", help="Bygger en fane med samme struktur som fjorårets ark – kategorier som spenner over kolonner. Kjør denne når dere vil se en oppdatert oversikt, ikke automatisk."):
+            with st.spinner("Bygger rangeringsvisning..."):
+                resultat_ws = bygg_rangeringsvisning(sh, runde, r, aktive_navn)
+            if resultat_ws:
+                st.success(f"✅ Ferdig! Se fanen 'Rangering' i Google Sheets.")
+            else:
+                st.error(f"Kunne ikke bygge visningen. Feilmelding: {st.session_state.get('_rangering_feil','ukjent')}")
+
     sok = st.text_input("🔍 Søk etter butikk", "")
     vis_navn = [n for n in aktive_navn if sok.lower() in n.lower()] if sok else aktive_navn
 
