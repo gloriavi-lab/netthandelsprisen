@@ -999,9 +999,10 @@ elif side == "🧑‍⚖️ Jury":
             st.caption(f"Feilmelding: {st.session_state['_gsheets_feil']}")
         st.stop()
 
+    FASE_NAVN = {1: "Fase 1 – Jury", 2: "Fase 2 – Ekspertvurdering"}
     jc1, jc2 = st.columns([1, 2])
     with jc1:
-        runde = st.selectbox("Runde", [1, 2, 3], format_func=lambda x: f"Runde {x}")
+        runde = st.selectbox("Fase", [1, 2], format_func=lambda x: FASE_NAVN[x])
     with jc2:
         jurynavn = st.text_input("Ditt navn (jurymedlem)", value=st.session_state.get("_jurynavn", ""), placeholder="Skriv navnet ditt her")
         st.session_state["_jurynavn"] = jurynavn
@@ -1010,7 +1011,14 @@ elif side == "🧑‍⚖️ Jury":
         st.warning("Skriv inn navnet ditt over for å begynne å vurdere.")
         st.stop()
 
-    with st.expander("⚙️ Innstillinger for denne runden (hvor mange går videre til neste runde, per klasse)"):
+    fagfelt_valgt = None
+    if runde == 2:
+        st.info("💡 I Ekspertvurdering vurderer du KUN ditt eget fagfelt – ikke alle 5 kategoriene. Din score erstatter Fase 1 sin score for akkurat den kategorien når finalistene beregnes.")
+        alle_kategorinavn = [kat for kat, _ in STANDARD_KRITERIER_RUNDE1]
+        unike_kategorier = list(dict.fromkeys(alle_kategorinavn))
+        fagfelt_valgt = st.selectbox("Ditt fagfelt (kategorien du er ekspert på)", unike_kategorier)
+
+    with st.expander("⚙️ Innstillinger for denne fasen (hvor mange går videre til neste fase, per klasse)"):
         gjeldende_cutoff = hent_cutoff(sh, runde)
         ic1, ic2, ic3, ic4 = st.columns([1,1,1,1])
         al = ic1.number_input("Antall Liten →", min_value=0, value=gjeldende_cutoff["Liten"], key=f"cutoff_liten_{runde}")
@@ -1067,9 +1075,14 @@ elif side == "🧑‍⚖️ Jury":
     for kat, krit in kriterier:
         kategorier_gruppert.setdefault(kat, []).append(krit)
 
+    if runde == 2 and fagfelt_valgt:
+        kategorier_gruppert = {fagfelt_valgt: kategorier_gruppert.get(fagfelt_valgt, [])}
+
+    kriterier_for_fullforingssjekk = [(kat, krit) for kat, kritliste in kategorier_gruppert.items() for krit in kritliste]
+
     for navn in vis_navn[:30]:  # begrens antall vist samtidig for ytelse
         butikk = r.get(navn, {})
-        alt_ferdig = all((navn + "|" + krit) in mine_vurderinger for _, krit in kriterier)
+        alt_ferdig = all((navn + "|" + krit) in mine_vurderinger for _, krit in kriterier_for_fullforingssjekk)
         merke = "✅" if alt_ferdig else ""
         with st.expander(f"{merke} **{navn}** — {butikk.get('orgform','–')} · {butikk.get('bransje','–')} · {butikk.get('klasse','–')}"):
             st.markdown(f"**Beskrivelse:** {butikk.get('kommentar','Ingen beskrivelse tilgjengelig.')}")
@@ -1099,7 +1112,7 @@ elif side == "🧑‍⚖️ Jury":
                 st.rerun()
 
 elif side == "🏆 Finale":
-    st.header("🏆 Finale – basert på jury sin vurdering (Runde 3)")
+    st.header("🏆 Finale – Fase 1 (jury) kombinert med Fase 2 (ekspertvurdering)")
     if not st.session_state.resultater:
         st.info("Last opp resultater.json i sidepanelet.")
         st.stop()
@@ -1109,25 +1122,59 @@ elif side == "🏆 Finale":
         st.error("Kunne ikke koble til Google Sheets.")
         st.stop()
 
-    vurderinger_r3 = hent_vurderinger(sh, 3)
-    if not vurderinger_r3:
-        st.info("Ingen vurderinger registrert for Runde 3 ennå. Finalister vises her når juryen har vurdert i Runde 3.")
+    vurderinger_fase1 = hent_vurderinger(sh, 1)
+    vurderinger_fase2 = hent_vurderinger(sh, 2)
+    if not vurderinger_fase1:
+        st.info("Ingen vurderinger registrert for Fase 1 ennå. Finalister vises her når juryen har begynt å vurdere.")
         st.stop()
 
-    snitt = beregn_snittscore_per_butikk(vurderinger_r3)
-    finalister = sorted(snitt.items(), key=lambda x: x[1], reverse=True)
+    from collections import defaultdict
+
+    def _snitt_per_butikk_kategori(vurderinger):
+        samlet = defaultdict(list)
+        for v in vurderinger:
+            try:
+                samlet[(v["Butikk"], v["Kategori"])].append(float(v["Score"]))
+            except (ValueError, KeyError):
+                continue
+        return {k: sum(vs) / len(vs) for k, vs in samlet.items() if vs}
+
+    fase1_per_kat = _snitt_per_butikk_kategori(vurderinger_fase1)
+    fase2_per_kat = _snitt_per_butikk_kategori(vurderinger_fase2)
+    alle_kategorinavn = list(dict.fromkeys(kat for kat, _ in STANDARD_KRITERIER_RUNDE1))
+
+    alle_butikker_fase1 = {navn for navn, _ in fase1_per_kat.keys()}
+    hybrid_snitt = {}
+    kilde_per_butikk = {}
+    for navn in alle_butikker_fase1:
+        kategori_scorer = []
+        kilder = []
+        for kat in alle_kategorinavn:
+            if (navn, kat) in fase2_per_kat:
+                kategori_scorer.append(fase2_per_kat[(navn, kat)])
+                kilder.append(f"{kat}: ekspert")
+            elif (navn, kat) in fase1_per_kat:
+                kategori_scorer.append(fase1_per_kat[(navn, kat)])
+        if kategori_scorer:
+            hybrid_snitt[navn] = round(sum(kategori_scorer) / len(kategori_scorer), 2)
+            kilde_per_butikk[navn] = kilder
+
+    finalister = sorted(hybrid_snitt.items(), key=lambda x: x[1], reverse=True)
+    st.caption("Score per butikk = snitt av 5 kategorier. Der en ekspert har vurdert en kategori i Fase 2, brukes den scoren i stedet for Fase 1 sin kategori-score – resten hentes fra Fase 1.")
 
     for i, (navn, score) in enumerate(finalister):
         butikk = r.get(navn, {})
         c, bg = score_farge(score)
+        ekspert_kilder = kilde_per_butikk.get(navn, [])
+        kilde_tekst = f'<div style="font-size:11px;color:#1B6B3A;margin-top:4px">✅ Ekspertvurdert: {", ".join(ekspert_kilder)}</div>' if ekspert_kilder else ''
         st.markdown(
             f'<div style="background:white;border-radius:12px;padding:20px 24px;margin-bottom:14px;border-left:5px solid {c};box-shadow:0 1px 6px rgba(0,0,0,0.08)">'
             f'<div style="display:flex;align-items:center;gap:16px">'
             f'<span style="font-size:24px;font-weight:700;color:{c}">🏆 {i+1}</span>'
             f'<div style="flex:1"><div style="font-size:17px;font-weight:700">{navn}</div>'
-            f'<div style="font-size:13px;color:#C8102E">{butikk.get("url","")}</div></div>'
+            f'<div style="font-size:13px;color:#C8102E">{butikk.get("url","")}</div>{kilde_tekst}</div>'
             f'<div style="text-align:right"><div style="font-weight:700;color:{c};font-size:22px">{score}</div>'
-            f'<div style="font-size:11px;color:#999">jury-snitt</div></div></div></div>',
+            f'<div style="font-size:11px;color:#999">samlet snitt</div></div></div></div>',
             unsafe_allow_html=True
         )
 
