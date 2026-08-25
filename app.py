@@ -1127,7 +1127,7 @@ elif side == "🧑‍⚖️ Jury":
     fagfelt_valgt = None
     if runde == 2:
         st.info("💡 I Ekspertvurdering vurderer du KUN ditt eget fagfelt – ikke alle 5 kategoriene. Din score erstatter Fase 1 sin score for akkurat den kategorien når finalistene beregnes.")
-        alle_kategorinavn = [kat for kat, _ in STANDARD_KRITERIER_RUNDE1]
+        alle_kategorinavn = [kat for kat, _, _ in STANDARD_KRITERIER_RUNDE1]
         unike_kategorier = list(dict.fromkeys(alle_kategorinavn))
         fagfelt_valgt = st.selectbox("Ditt fagfelt (kategorien du er ekspert på)", unike_kategorier)
 
@@ -1257,7 +1257,7 @@ elif side == "🏆 Finale":
 
     fase1_per_kat = _snitt_per_butikk_kategori(vurderinger_fase1)
     fase2_per_kat = _snitt_per_butikk_kategori(vurderinger_fase2)
-    alle_kategorinavn = list(dict.fromkeys(kat for kat, _ in STANDARD_KRITERIER_RUNDE1))
+    alle_kategorinavn = list(dict.fromkeys(kat for kat, _, _ in STANDARD_KRITERIER_RUNDE1))
 
     alle_butikker_fase1 = {navn for navn, _ in fase1_per_kat.keys()}
     hybrid_snitt = {}
