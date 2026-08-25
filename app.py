@@ -43,7 +43,9 @@ div[data-testid="stExpander"] { background-color: white; border-radius: 8px; }
 .crit-beg { font-size: 12px; color: #333; line-height: 1.6; }
 .crit-vekt { font-size: 11px; color: #aaa; margin-top: 4px; font-style: italic; }
 /* "Søk butikk"-søkefeltet i sidepanelet – tydelig mørkere bakgrunn for bedre synlighet.
-   Flere selektorer siden Streamlit sin interne DOM-struktur for selectbox kan variere. */
+   Bruker role="combobox" (stabilt tilgjengelighets-attributt) i tillegg til data-testid,
+   siden Streamlit sine interne CSS-klassenavn endres mellom versjoner og ikke er pålitelige. */
+section[data-testid="stSidebar"] [role="combobox"],
 section[data-testid="stSidebar"] [data-testid="stSelectbox"] [data-baseweb="select"],
 section[data-testid="stSidebar"] [data-testid="stSelectbox"] [data-baseweb="select"] > div,
 section[data-testid="stSidebar"] [data-testid="stSelectbox"] div[class*="control"] {
@@ -51,6 +53,7 @@ section[data-testid="stSidebar"] [data-testid="stSelectbox"] div[class*="control
     border-radius: 6px !important;
     border-color: #3A3A3A !important;
 }
+section[data-testid="stSidebar"] [data-testid="stSelectbox"],
 section[data-testid="stSidebar"] [data-testid="stSelectbox"] * {
     color: #FFFFFF !important;
 }
@@ -150,11 +153,18 @@ def hent_eller_lag_ark(sh, navn, headers):
 
 
 def sikre_kriterier_seedet(sh):
-    """Fyller inn Runde 1-kriteriene automatisk første gang arket brukes."""
+    """Fyller inn kriteriene for BÅDE Fase 1 og Fase 2 automatisk – sjekker de to fasene
+    UAVHENGIG av hverandre, slik at Fase 2 legges til selv om Fase 1 allerede fantes fra
+    før (samme 15 kriterier – i Fase 2 velger hvert jurymedlem selv fagfelt/kategori)."""
     ws = hent_eller_lag_ark(sh, "Kriterier", ["Runde", "Kategori", "Kriterium", "Rekkefolge"])
-    if len(ws.get_all_values()) <= 1:
-        rader = [[1, kat, krit, rekkefolge] for kat, krit, rekkefolge in STANDARD_KRITERIER_RUNDE1]
-        ws.append_rows(rader)
+    eksisterende_runder = {str(r.get("Runde")) for r in ws.get_all_records()}
+    nye_rader = []
+    if "1" not in eksisterende_runder:
+        nye_rader += [[1, kat, krit, rekkefolge] for kat, krit, rekkefolge in STANDARD_KRITERIER_RUNDE1]
+    if "2" not in eksisterende_runder:
+        nye_rader += [[2, kat, krit, rekkefolge] for kat, krit, rekkefolge in STANDARD_KRITERIER_RUNDE1]
+    if nye_rader:
+        ws.append_rows(nye_rader)
     # VIKTIG: formatering kjøres KUN én gang per nettleserøkt, ikke ved hver eneste
     # interaksjon – ellers sprenges Google sin grense på API-kall per minutt raskt.
     if not st.session_state.get("_kriterier_formatert"):
