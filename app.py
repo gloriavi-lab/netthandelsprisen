@@ -42,14 +42,20 @@ div[data-testid="stExpander"] { background-color: white; border-radius: 8px; }
 .crit-name { font-size: 13px; font-weight: 700; color: #1A1A1A; margin-bottom: 6px; }
 .crit-beg { font-size: 12px; color: #333; line-height: 1.6; }
 .crit-vekt { font-size: 11px; color: #aaa; margin-top: 4px; font-style: italic; }
-/* "Hopp til butikk"-søkefeltet i sidepanelet – tydelig mørkere bakgrunn for bedre synlighet */
-section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[data-baseweb="select"] > div {
+/* "Søk butikk"-søkefeltet i sidepanelet – tydelig mørkere bakgrunn for bedre synlighet.
+   Flere selektorer siden Streamlit sin interne DOM-struktur for selectbox kan variere. */
+section[data-testid="stSidebar"] [data-testid="stSelectbox"] [data-baseweb="select"],
+section[data-testid="stSidebar"] [data-testid="stSelectbox"] [data-baseweb="select"] > div,
+section[data-testid="stSidebar"] [data-testid="stSelectbox"] div[class*="control"] {
     background-color: #3A3A3A !important;
-    color: #FFFFFF !important;
     border-radius: 6px !important;
+    border-color: #3A3A3A !important;
 }
-section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[data-baseweb="select"] > div * {
+section[data-testid="stSidebar"] [data-testid="stSelectbox"] * {
     color: #FFFFFF !important;
+}
+section[data-testid="stSidebar"] [data-testid="stSelectbox"] svg {
+    fill: #FFFFFF !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -367,15 +373,11 @@ def _kolonnebokstav(n: int) -> str:
     return bokstav
 
 
-def bygg_rangeringsvisning(sh, runde: int, resultater: dict, aktive_navn: list):
+def bygg_rangeringsvisning(sh, runde: int, resultater: dict, aktive_navn: list, ark_navn: str = "Rangering"):
     """
-    Bygger en 'Rangering'-fane med LEVENDE Google Sheets-formler (AVERAGEIFS) som regner
-    seg ut på nytt automatisk – enten data legges inn via appen eller direkte i den
-    skjulte 'Vurderinger'-fanen. To ting som feilet forrige forsøk er fikset:
-    1) Skilletegn i formler (, vs ;) velges nå basert på ARKETS FAKTISKE språkinnstilling
-       (sh.locale), i stedet for å anta amerikansk stil.
-    2) Bruker HELE kolonner (F:F) i stedet for et fast radintervall (F2:F100000) – et
-       slikt intervall feiler hvis Vurderinger-arket har færre rader enn det referert til.
+    Bygger en Rangering-fane (navn valgfritt via ark_navn, slik at hver fase kan ha sin
+    EGEN fane i stedet for at de overskriver hverandre) med LEVENDE Google Sheets-formler.
+    Kolonner: Butikk | Vurdert? | Klasse | URL (klikkbar) | ...kriterier... | Snitt totalt
     """
     kriterier = hent_kriterier(sh, runde)
     if not kriterier:
@@ -385,11 +387,11 @@ def bygg_rangeringsvisning(sh, runde: int, resultater: dict, aktive_navn: list):
     for kat, krit in kriterier:
         kategorier_gruppert.setdefault(kat, []).append(krit)
 
-    # Header-rader
-    rad1 = ["Butikk", "", ""]  # kategori-navn, sammenslått over sine kolonner (Klasse/URL har ingen kategori)
-    rad2 = ["", "Klasse", "URL"]        # underkriterium-navn
-    kategori_spenn = []  # (start_kol, slutt_kol, kategori) for sammenslåing
-    kol = 3
+    # Header-rader – 4 identifiserende kolonner før selve kategoriene
+    rad1 = ["Butikk", "", "", ""]
+    rad2 = ["", "Vurdert?", "Klasse", "URL"]
+    kategori_spenn = []
+    kol = 4
     for kat, kriterieliste in kategorier_gruppert.items():
         start = kol
         for krit in kriterieliste:
@@ -401,7 +403,6 @@ def bygg_rangeringsvisning(sh, runde: int, resultater: dict, aktive_navn: list):
     rad1.append("Snitt totalt")
     rad2.append("")
 
-    # Finn riktig skilletegn basert på arkets FAKTISKE språkinnstilling – ikke en antakelse
     try:
         locale = (sh.locale or "en_US").lower()
     except Exception:
@@ -415,7 +416,13 @@ def bygg_rangeringsvisning(sh, runde: int, resultater: dict, aktive_navn: list):
     for navn in aktive_navn:
         navn_escaped = _escape(navn)
         b = resultater.get(navn, {})
-        rad = [navn, b.get("klasse", ""), b.get("url", "")]
+        url = b.get("url", "")
+        lenke_formel = f'=HYPERLINK("{url}"{skilletegn}"Besøk →")' if url else ""
+        vurdert_formel = (
+            f'=IF(COUNTIFS(Vurderinger!A:A{skilletegn}"{navn_escaped}"{skilletegn}'
+            f'Vurderinger!C:C{skilletegn}{runde})>0{skilletegn}"✅"{skilletegn}"❌")'
+        )
+        rad = [navn, vurdert_formel, b.get("klasse", ""), lenke_formel]
         for kat, kriterieliste in kategorier_gruppert.items():
             for krit in kriterieliste:
                 krit_escaped = _escape(krit)
@@ -428,24 +435,24 @@ def bygg_rangeringsvisning(sh, runde: int, resultater: dict, aktive_navn: list):
                 rad.append(formel)
         databader.append(rad)
 
-    antall_kriterie_kolonner = len(rad1) - 4  # minus "Butikk", "Klasse", "URL" og "Snitt totalt"
+    antall_kriterie_kolonner = len(rad1) - 5  # minus Butikk, Vurdert?, Klasse, URL og Snitt totalt
     alle_rader = [rad1, rad2] + databader
 
     try:
         try:
-            ws = sh.worksheet("Rangering")
+            ws = sh.worksheet(ark_navn)
             ws.clear()
         except gspread.WorksheetNotFound:
-            ws = sh.add_worksheet(title="Rangering", rows=len(alle_rader) + 10, cols=len(rad1) + 2)
+            ws = sh.add_worksheet(title=ark_navn, rows=len(alle_rader) + 10, cols=len(rad1) + 2)
 
         ws.update("A1", alle_rader, value_input_option="USER_ENTERED")  # USER_ENTERED = tolkes som formler
 
-        siste_kriterie_kol = _kolonnebokstav(antall_kriterie_kolonner + 2)  # +2 for Klasse/URL-forskyvning
-        totalkol = _kolonnebokstav(antall_kriterie_kolonner + 3)
+        siste_kriterie_kol = _kolonnebokstav(antall_kriterie_kolonner + 3)  # +3 for Vurdert?/Klasse/URL-forskyvning
+        totalkol = _kolonnebokstav(antall_kriterie_kolonner + 4)
         totalformler = []
         for i in range(len(databader)):
             radnr = i + 3  # rad 1-2 er header, data starter rad 3
-            totalformler.append([f'=IFERROR(AVERAGE(D{radnr}:{siste_kriterie_kol}{radnr}){skilletegn}"")'])
+            totalformler.append([f'=IFERROR(AVERAGE(E{radnr}:{siste_kriterie_kol}{radnr}){skilletegn}"")'])
         if totalformler:
             ws.update(f"{totalkol}3", totalformler, value_input_option="USER_ENTERED")
 
@@ -472,13 +479,13 @@ def bygg_rangeringsvisning(sh, runde: int, resultater: dict, aktive_navn: list):
             })
 
         siste_kol = _kolonnebokstav(len(rad1) - 1)
-        # De tre identifiserende kolonnene (Butikk, Klasse, URL) – hver sin vertikalt sammenslåtte overskrift
-        for enkeltkol in ["A", "B", "C"]:
+        # De fire identifiserende kolonnene (Butikk, Vurdert?, Klasse, URL) – hver sin vertikalt sammenslåtte overskrift
+        for enkeltkol in ["A", "B", "C", "D"]:
             ws.format(f"{enkeltkol}1:{enkeltkol}2", {"backgroundColor": {"red": 0.2, "green": 0.2, "blue": 0.2}, "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}}})
             ws.merge_cells(f"{enkeltkol}1:{enkeltkol}2")
         ws.format(f"{siste_kol}1:{siste_kol}2", {"backgroundColor": {"red": 0.2, "green": 0.2, "blue": 0.2}, "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}}})
         ws.merge_cells(f"{siste_kol}1:{siste_kol}2")
-        ws.freeze(rows=2, cols=3)
+        ws.freeze(rows=2, cols=4)
         ws.columns_auto_resize(0, len(rad1) - 1)
         return ws
     except Exception as e:
@@ -580,7 +587,7 @@ with st.sidebar:
     if st.session_state.get("resultater"):
         alle_navn = sorted(st.session_state.resultater.keys())
         st.selectbox(
-            "🔍 Hopp til butikk", ["–"] + alle_navn, key="hurtigsok", on_change=_hopp_til_butikk,
+            "🔍 Søk butikk", ["–"] + alle_navn, key="hurtigsok", on_change=_hopp_til_butikk,
             help="Skriv for å søke – hopper rett til butikkens detaljer"
         )
 
@@ -674,25 +681,12 @@ def vis_detaljpanel(butikk, juryvurderinger={}):
     if ap and ap.get("palagt") and not ap.get("rapport_funnet"):
         st.markdown(f'<div class="warning-box">⚠️ Åpenhetsloven: Rapporteringspliktig men ingen rapport funnet.</div>', unsafe_allow_html=True)
 
-    st.markdown('<div class="jury-box"><div style="font-size:14px;font-weight:700;color:#333;margin-bottom:14px">🎯 Juryverktøy</div>', unsafe_allow_html=True)
-    jcol1, jcol2, jcol3 = st.columns([2, 2, 3])
-    with jcol1:
-        jury_score = st.select_slider("Juryscore", options=[1,2,3,4,5], value=max(1, min(5, int(lagret.get("Juryscore", butikk.get("juryScore", 3)) or 3))), format_func=lambda x: "⭐"*x, key=f"js_{navn}")
-    with jcol2:
-        js_val = lagret.get("Status", butikk.get("juryStatus", "Ikke vurdert"))
-        if js_val not in ["Ikke vurdert","Kandidat","Semifinalist","Finalist","Vinner"]:
-            js_val = "Ikke vurdert"
-        jury_status = st.selectbox("Status", ["Ikke vurdert","Kandidat","Semifinalist","Finalist","Vinner"], index=["Ikke vurdert","Kandidat","Semifinalist","Finalist","Vinner"].index(js_val), key=f"jstat_{navn}")
-    with jcol3:
-        jury_notat = st.text_area("Jurynotat", value=lagret.get("Notat", butikk.get("juryNote","")), placeholder="Skriv jurynotat her...", height=90, key=f"jnot_{navn}")
-    if st.button("💾 Lagre vurdering", key=f"jlagre_{navn}"):
-        lagre_jury(navn, jury_score, jury_status, jury_notat)
-        st.session_state.resultater[navn]["juryScore"] = jury_score
-        st.session_state.resultater[navn]["juryStatus"] = jury_status
-        st.session_state.resultater[navn]["juryNote"] = jury_notat
-        lagre_lokalt(st.session_state.resultater)
-        st.success("✅ Lagret!")
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="jury-box">'
+        '<div style="font-size:14px;font-weight:700;color:#333;margin-bottom:6px">🎯 Juryvurdering</div>'
+        '<div style="font-size:13px;color:#666">Juryvurdering skjer nå i egen fane – gå til <strong>"🧑‍⚖️ Jury"</strong> i menyen til venstre for å score og kommentere denne butikken (data lagres i Google Sheets, ikke her).</div>'
+        '</div>', unsafe_allow_html=True
+    )
 
     st.markdown(f'<div style="background:white;border:1.5px solid #E8E6E2;border-radius:8px;padding:12px 16px;border-left:3px solid #C8102E;font-size:13px;color:#666;margin:12px 0"><strong style="font-size:11px;color:#999;text-transform:uppercase;letter-spacing:0.5px">Screeningresultat</strong><br/>{butikk.get("screeningBegrunnelse","")}</div>', unsafe_allow_html=True)
 
@@ -866,6 +860,113 @@ def vis_detaljpanel(butikk, juryvurderinger={}):
         st.session_state.valgt_butikk = None
         st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
+
+
+def bygg_finale_rangeringsvisning(sh, resultater: dict, aktive_navn: list, ark_navn: str = "Rangering Finale"):
+    """
+    Samme visuelle mal som bygg_rangeringsvisning, men med HYBRIDE formler: for hver
+    kategori brukes Fase 2 (ekspert) sin score HVIS den finnes for butikken/kategorien,
+    ellers faller den tilbake til Fase 1 sin score – matcher logikken i selve Finale-siden.
+    """
+    kriterier_f1 = hent_kriterier(sh, 1)
+    if not kriterier_f1:
+        return None
+    kategorier_gruppert = {}
+    for kat, krit in kriterier_f1:
+        kategorier_gruppert.setdefault(kat, []).append(krit)
+
+    rad1 = ["Butikk", "", "", ""]
+    rad2 = ["", "Vurdert?", "Klasse", "URL"]
+    kategori_spenn = []
+    kol = 4
+    for kat, kriterieliste in kategorier_gruppert.items():
+        start = kol
+        for krit in kriterieliste:
+            rad1.append("")
+            rad2.append(krit)
+            kol += 1
+        kategori_spenn.append((start, kol - 1, kat))
+        rad1[start] = kat
+    rad1.append("Snitt totalt")
+    rad2.append("")
+
+    try:
+        locale = (sh.locale or "en_US").lower()
+    except Exception:
+        locale = "en_us"
+    sk = ";" if not locale.startswith("en") else ","
+
+    def _esc(t): return t.replace('"', '""')
+
+    databader = []
+    for navn in aktive_navn:
+        n = _esc(navn)
+        b = resultater.get(navn, {})
+        url = b.get("url", "")
+        lenke = f'=HYPERLINK("{url}"{sk}"Besøk →")' if url else ""
+        vurdert = f'=IF(COUNTIFS(Vurderinger!A:A{sk}"{n}"{sk}Vurderinger!C:C{sk}1)>0{sk}"✅"{sk}"❌")'
+        rad = [navn, vurdert, b.get("klasse", ""), lenke]
+        for kat, kriterieliste in kategorier_gruppert.items():
+            kat_esc = _esc(kat)
+            for krit in kriterieliste:
+                krit_esc = _esc(krit)
+                # Bruk Fase 2 (ekspert) sin score for kriteriet HVIS eksperten har vurdert
+                # denne KATEGORIEN for denne butikken – ellers fall tilbake til Fase 1
+                formel = (
+                    f'=IFERROR(IF(COUNTIFS(Vurderinger!A:A{sk}"{n}"{sk}Vurderinger!C:C{sk}2{sk}Vurderinger!D:D{sk}"{kat_esc}")>0{sk}'
+                    f'AVERAGEIFS(Vurderinger!F:F{sk}Vurderinger!A:A{sk}"{n}"{sk}Vurderinger!C:C{sk}2{sk}Vurderinger!E:E{sk}"{krit_esc}"){sk}'
+                    f'AVERAGEIFS(Vurderinger!F:F{sk}Vurderinger!A:A{sk}"{n}"{sk}Vurderinger!C:C{sk}1{sk}Vurderinger!E:E{sk}"{krit_esc}")){sk}"")'
+                )
+                rad.append(formel)
+        databader.append(rad)
+
+    antall_kriterie_kolonner = len(rad1) - 5
+    alle_rader = [rad1, rad2] + databader
+
+    try:
+        try:
+            ws = sh.worksheet(ark_navn)
+            ws.clear()
+        except gspread.WorksheetNotFound:
+            ws = sh.add_worksheet(title=ark_navn, rows=len(alle_rader) + 10, cols=len(rad1) + 2)
+
+        ws.update("A1", alle_rader, value_input_option="USER_ENTERED")
+
+        siste_kriterie_kol = _kolonnebokstav(antall_kriterie_kolonner + 3)
+        totalkol = _kolonnebokstav(antall_kriterie_kolonner + 4)
+        totalformler = []
+        for i in range(len(databader)):
+            radnr = i + 3
+            totalformler.append([f'=IFERROR(AVERAGE(E{radnr}:{siste_kriterie_kol}{radnr}){sk}"")'])
+        if totalformler:
+            ws.update(f"{totalkol}3", totalformler, value_input_option="USER_ENTERED")
+
+        try:
+            ws.unmerge_cells("A1:" + _kolonnebokstav(len(rad1) - 1) + "2")
+        except Exception:
+            pass
+
+        for i, (start, slutt, kat) in enumerate(kategori_spenn):
+            farge = KATEGORI_FARGER[i % len(KATEGORI_FARGER)]
+            omraade = f"{_kolonnebokstav(start)}1:{_kolonnebokstav(slutt)}1"
+            ws.merge_cells(omraade)
+            ws.format(omraade, {"backgroundColor": farge, "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}}, "horizontalAlignment": "CENTER"})
+            underomraade = f"{_kolonnebokstav(start)}2:{_kolonnebokstav(slutt)}2"
+            ws.format(underomraade, {"backgroundColor": {"red": 0.95, "green": 0.95, "blue": 0.95}, "textFormat": {"bold": True, "fontSize": 9}, "wrapStrategy": "WRAP"})
+
+        siste_kol = _kolonnebokstav(len(rad1) - 1)
+        for enkeltkol in ["A", "B", "C", "D"]:
+            ws.format(f"{enkeltkol}1:{enkeltkol}2", {"backgroundColor": {"red": 0.2, "green": 0.2, "blue": 0.2}, "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}}})
+            ws.merge_cells(f"{enkeltkol}1:{enkeltkol}2")
+        ws.format(f"{siste_kol}1:{siste_kol}2", {"backgroundColor": {"red": 0.2, "green": 0.2, "blue": 0.2}, "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}}})
+        ws.merge_cells(f"{siste_kol}1:{siste_kol}2")
+        ws.freeze(rows=2, cols=4)
+        ws.columns_auto_resize(0, len(rad1) - 1)
+        return ws
+    except Exception as e:
+        st.session_state["_rangering_finale_feil"] = str(e)
+        return None
+
 
 
 if side == "📋 Screening":
@@ -1055,24 +1156,27 @@ elif side == "🧑‍⚖️ Jury":
         st.warning(f"Ingen kriterier funnet for Runde {runde} i 'Kriterier'-arket. Legg dem til der (kolonner: Runde, Kategori, Kriterium, Rekkefolge).")
         st.stop()
 
-    st.caption(f"{len(aktive_navn)} butikker aktive i denne runden.")
+    st.caption(f"{len(aktive_navn)} butikker aktive i denne fasen.")
+
+    RANGERING_ARK_NAVN = {1: "Rangering Fase 1", 2: "Rangering Ekspertvurdering"}
+    denne_fasens_ark = RANGERING_ARK_NAVN[runde]
 
     # Automatisk oppdatering av Rangering-fanen, men maks én gang hvert 90. sekund –
     # gir en "levende følelse" uten å risikere samme kvote-problem som tidligere
     import time as _time
-    siste_oppdatering = st.session_state.get("_rangering_siste_oppdatering", 0)
+    siste_oppdatering = st.session_state.get(f"_rangering_siste_oppdatering_{runde}", 0)
     if _time.time() - siste_oppdatering > 90:
-        bygg_rangeringsvisning(sh, runde, r, aktive_navn)
-        st.session_state["_rangering_siste_oppdatering"] = _time.time()
+        bygg_rangeringsvisning(sh, runde, r, aktive_navn, ark_navn=denne_fasens_ark)
+        st.session_state[f"_rangering_siste_oppdatering_{runde}"] = _time.time()
 
     rc1, rc2 = st.columns([2, 1])
     with rc2:
-        if st.button("🎨 Oppdater ryddig oversikt nå", help="Selve TALLENE i Rangering oppdaterer seg allerede automatisk (levende formler) uansett. Denne knappen bygger kun oppsettet på nytt hvis listen over aktive butikker har endret seg."):
+        if st.button("🎨 Oppdater ryddig oversikt nå", help="Selve TALLENE oppdaterer seg allerede automatisk (levende formler) uansett. Denne knappen bygger kun oppsettet på nytt hvis listen over aktive butikker har endret seg."):
             with st.spinner("Bygger rangeringsvisning..."):
-                resultat_ws = bygg_rangeringsvisning(sh, runde, r, aktive_navn)
-                st.session_state["_rangering_siste_oppdatering"] = _time.time()
+                resultat_ws = bygg_rangeringsvisning(sh, runde, r, aktive_navn, ark_navn=denne_fasens_ark)
+                st.session_state[f"_rangering_siste_oppdatering_{runde}"] = _time.time()
             if resultat_ws:
-                st.success(f"✅ Ferdig! Se fanen 'Rangering' i Google Sheets.")
+                st.success(f"✅ Ferdig! Se fanen '{denne_fasens_ark}' i Google Sheets.")
             else:
                 st.error(f"Kunne ikke bygge visningen. Feilmelding: {st.session_state.get('_rangering_feil','ukjent')}")
 
@@ -1173,6 +1277,20 @@ elif side == "🏆 Finale":
 
     finalister = sorted(hybrid_snitt.items(), key=lambda x: x[1], reverse=True)
     st.caption("Score per butikk = snitt av 5 kategorier. Der en ekspert har vurdert en kategori i Fase 2, brukes den scoren i stedet for Fase 1 sin kategori-score – resten hentes fra Fase 1.")
+
+    import time as _time
+    siste_f = st.session_state.get("_rangering_finale_siste_oppdatering", 0)
+    if _time.time() - siste_f > 90:
+        bygg_finale_rangeringsvisning(sh, r, list(hybrid_snitt.keys()))
+        st.session_state["_rangering_finale_siste_oppdatering"] = _time.time()
+    if st.button("🎨 Oppdater 'Rangering Finale' i Google Sheets nå"):
+        with st.spinner("Bygger..."):
+            resultat_ws = bygg_finale_rangeringsvisning(sh, r, list(hybrid_snitt.keys()))
+            st.session_state["_rangering_finale_siste_oppdatering"] = _time.time()
+        if resultat_ws:
+            st.success("✅ Ferdig! Se fanen 'Rangering Finale' i Google Sheets.")
+        else:
+            st.error(f"Kunne ikke bygge visningen. Feilmelding: {st.session_state.get('_rangering_finale_feil','ukjent')}")
 
     for i, (navn, score) in enumerate(finalister):
         butikk = r.get(navn, {})
