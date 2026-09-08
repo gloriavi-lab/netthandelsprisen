@@ -42,23 +42,64 @@ div[data-testid="stExpander"] { background-color: white; border-radius: 8px; }
 .crit-name { font-size: 13px; font-weight: 700; color: #1A1A1A; margin-bottom: 6px; }
 .crit-beg { font-size: 12px; color: #333; line-height: 1.6; }
 .crit-vekt { font-size: 11px; color: #aaa; margin-top: 4px; font-style: italic; }
-/* "Søk butikk"-søkefeltet i sidepanelet – tydelig mørkere bakgrunn for bedre synlighet.
+/* "Søk butikk"-søkefeltet i sidepanelet – samme lysegrå stil som "Alle"-knappene under
+   Bransje/Klasse/Søk i nettbutikk på Screening-siden, i stedet for den tidligere mørke
+   bakgrunnen som skilte seg rotete ut fra resten av det lyse sidepanelet.
    Bruker role="combobox" (stabilt tilgjengelighets-attributt) i tillegg til data-testid,
    siden Streamlit sine interne CSS-klassenavn endres mellom versjoner og ikke er pålitelige. */
 section[data-testid="stSidebar"] [role="combobox"],
 section[data-testid="stSidebar"] [data-testid="stSelectbox"] [data-baseweb="select"],
 section[data-testid="stSidebar"] [data-testid="stSelectbox"] [data-baseweb="select"] > div,
 section[data-testid="stSidebar"] [data-testid="stSelectbox"] div[class*="control"] {
-    background-color: #3A3A3A !important;
+    background-color: #F0EFEC !important;
     border-radius: 6px !important;
-    border-color: #3A3A3A !important;
+    border-color: #E8E6E2 !important;
 }
 section[data-testid="stSidebar"] [data-testid="stSelectbox"],
 section[data-testid="stSidebar"] [data-testid="stSelectbox"] * {
-    color: #FFFFFF !important;
+    color: #1A1A1A !important;
 }
 section[data-testid="stSidebar"] [data-testid="stSelectbox"] svg {
-    fill: #FFFFFF !important;
+    fill: #1A1A1A !important;
+}
+/* Screening-statistikknappene ("Går videre", "Krever sjekk", "⚠️ Manuell sjekk" osv.) ble
+   avkuttet med "..." fordi 9 kolonner er trangt – la teksten bryte til ny linje i stedet. */
+div[data-testid="stButton"] button {
+    white-space: normal !important;
+    height: auto !important;
+    min-height: 54px;
+    line-height: 1.3;
+    padding: 8px 6px !important;
+}
+div[data-testid="stButton"] button p {
+    white-space: normal !important;
+    overflow-wrap: break-word;
+    font-size: 12px !important;
+}
+/* På mindre laptop-skjermer er 9 knapper på én rad for trangt til at teksten er lesbar selv
+   med linjebryting over – la knappene flyte over på flere rader i stedet for å klemmes sammen. */
+@media (max-width: 1440px) {
+    div[data-testid="stButton"] button p {
+        font-size: 10px !important;
+    }
+    div[data-testid="stButton"] button {
+        min-height: 58px;
+        padding: 6px 4px !important;
+    }
+    div[data-testid="stHorizontalBlock"] {
+        flex-wrap: wrap !important;
+        row-gap: 8px;
+    }
+    div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+        min-width: 110px !important;
+        flex: 1 1 19% !important;
+    }
+}
+/* Søk nettbutikk-feltet – tydeligere ramme/bakgrunn så det skiller seg visuelt fra
+   filter-nedtrekkene (Klasse/Bransje) ved siden av. */
+div[data-testid="stTextInput"]:has(input[aria-label="🔍 Søk nettbutikk"]) input {
+    border: 2px solid #C8102E !important;
+    background-color: #FFF8F8 !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -572,8 +613,9 @@ with st.sidebar:
             f'</div>', unsafe_allow_html=True
         )
         if st.button("✕ Lukk detaljer", key="lukk_sidebar", use_container_width=True):
+            # Ingen st.rerun() – sidepanelet kjører før hoveddelen i samme skript-kjøring,
+            # så Screening-løkken lenger ned leser allerede oppdatert session_state.
             st.session_state.valgt_butikk = None
-            st.rerun()
 
     st.markdown("---")
     side = st.radio("Naviger", ["📋 Screening", "⭐ Topp 300", "🧑‍⚖️ Jury", "🏆 Finale", "📦 Logistikk", "ℹ️ Informasjon"], label_visibility="collapsed", key="nav_side")
@@ -795,7 +837,7 @@ def vis_detaljpanel(butikk, juryvurderinger={}):
                         # Ikke-scorede kriterier (kundeklubb/nyhetsbrev) – vis stjerne hvis ja, gråtekst hvis nei
                         har = k.get("har_kundeklubb", k.get("har_nyhetsbrev", False))
                         if har:
-                            badge_html = '<span style="font-size:22px;line-height:1;display:inline-block" title="Ja">⭐</span>'
+                            badge_html = '<span style="background:#E6F4EA;color:#1E7A34;padding:6px 10px;border-radius:8px;font-weight:700;font-size:12px;display:inline-block;min-width:36px;text-align:center">Ja ⭐</span>'
                         else:
                             badge_html = '<span style="background:#F0EFEC;color:#999;padding:6px 10px;border-radius:8px;font-weight:700;font-size:12px;display:inline-block;min-width:36px;text-align:center">Nei</span>'
                     st.markdown(f"""
@@ -816,6 +858,18 @@ def vis_detaljpanel(butikk, juryvurderinger={}):
                 f'<strong>⚠️ Krever manuell sjekk:</strong> {butikk["krevManuellSjekk"]}'
                 f'</div>', unsafe_allow_html=True
             )
+
+        ny_kommentar = st.text_area(
+            "💬 Kommentar til den manuelle sjekken",
+            value=butikk.get("manuellKommentar", ""),
+            key=f"kommentar_{navn}",
+            placeholder="Notat til den som gjennomfører/følger opp den manuelle sjekken av denne butikken...",
+            height=90,
+        )
+        if ny_kommentar != butikk.get("manuellKommentar", ""):
+            st.session_state.resultater[navn]["manuellKommentar"] = ny_kommentar
+            lagre_lokalt(st.session_state.resultater)
+            st.rerun()
 
         sk = butikk.get("sidekontroll")
         if sk and sk.get("besokt"):
@@ -990,20 +1044,23 @@ if side == "📋 Screening":
         ("alle","Totalt",len(alle),"#1A1A1A"),
         ("inn","Går videre",sum(1 for s in alle if s.get("status")=="inn" and not s.get("enk")),"#1B6B3A"),
         ("ut","Filtrert ut",sum(1 for s in alle if s.get("status")=="ut" and not s.get("enk")),"#C8102E"),
-        ("usikker","Krever sjekk",sum(1 for s in alle if s.get("status")=="usikker"),"#7A4800"),
-        ("manuell_sjekk","⚠️ Manuell sjekk",sum(1 for s in alle if s.get("krevManuellSjekk")),"#E8A020"),
+        ("usikker","⛔ Bør vurderes ekskludert",sum(1 for s in alle if s.get("status")=="usikker"),"#7A4800"),
+        ("manuell_sjekk","📝 Har notat til juryen",sum(1 for s in alle if s.get("krevManuellSjekk")),"#E8A020"),
         ("enk","ENK",sum(1 for s in alle if s.get("enk")),"#C8102E"),
         ("liten","Liten",sum(1 for s in alle if s.get("klasse")=="Liten"),"#0D4A8A"),
         ("medium","Medium",sum(1 for s in alle if s.get("klasse")=="Medium"),"#7A4800"),
         ("stor","Stor",sum(1 for s in alle if s.get("klasse")=="Stor"),"#5B2D8E"),
     ]
-    cols = st.columns(9)
-    for i, (key, label, verdi, farge) in enumerate(filtre_def):
-        with cols[i]:
-            if st.button(f"{label}\n{verdi}", key=f"stat_{key}", use_container_width=True):
-                st.session_state.screening_filter = key
-                st.session_state.valgt_butikk = None
-                st.rerun()
+    # Delt i to rader (5 + 4) i stedet for én rad med 9 kolonner – gir dobbelt så mye
+    # bredde per knapp, slik at teksten faktisk får plass uansett skjermbredde/CSS-kvirker.
+    for rad in (filtre_def[:5], filtre_def[5:]):
+        radkolonner = st.columns(len(rad))
+        for i, (key, label, verdi, farge) in enumerate(rad):
+            with radkolonner[i]:
+                if st.button(f"{label}\n{verdi}", key=f"stat_{key}", use_container_width=True):
+                    st.session_state.screening_filter = key
+                    st.session_state.valgt_butikk = None
+                    st.rerun()
     fcol1, fcol2, fcol3 = st.columns([2,2,3])
     with fcol1:
         klasse_f = st.selectbox("Klasse", ["Alle","Liten","Medium","Stor"])
@@ -1027,24 +1084,64 @@ if side == "📋 Screening":
     if sok: vis = [s for s in vis if sok.lower() in s.get("name","").lower()]
     vis = sorted(vis, key=lambda x: x.get("total") or 0, reverse=True)
     st.markdown(f"**Viser {len(vis)} butikker**")
-    if st.session_state.valgt_butikk and st.session_state.valgt_butikk in r:
-        vis_detaljpanel(r[st.session_state.valgt_butikk])
     st.markdown("---")
+
+    # Status/Klasse vises som redigerbare nedtrekk direkte i raden, slik at man kan
+    # rette en åpenbart feil AI-vurdering manuelt uten å måtte åpne detaljene eller
+    # røre selve scoringslogikken. "manueltEndret" er kun et sporingsflagg som vises
+    # som en liten merkelapp ved butikknavnet.
+    STATUS_TIL_LABEL = {"inn": "Går videre", "usikker": "Krever sjekk", "ut": "Filtrert ut"}
+    LABEL_TIL_STATUS = {v: k for k, v in STATUS_TIL_LABEL.items()}
+    STATUS_VALG = list(LABEL_TIL_STATUS.keys())
+    KLASSE_VALG = ["ENK", "Liten", "Medium", "Stor"]
+
     for i, s in enumerate(vis):
-        tcol = st.columns([3,2,1,1,1,1,2,2])
+        tcol = st.columns([3,2,1,1.3,1.3,1,2,2])
         navn = s.get("name","")
         url = s.get("url","")
         with tcol[0]:
-            st.markdown(f'<div style="font-weight:700;font-size:14px">{navn}</div><div style="font-size:11px;color:#C8102E">{url.replace("https://","").replace("http://","")[:35] if url else ""}</div>', unsafe_allow_html=True)
+            merket = ' <span style="background:#F0EFEC;color:#666;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;white-space:nowrap">✏️ Endret manuelt</span>' if s.get("manueltEndret") else ""
+            st.markdown(f'<div style="font-weight:700;font-size:14px">{navn}{merket}</div><div style="font-size:11px;color:#C8102E">{url.replace("https://","").replace("http://","")[:35] if url else ""}</div>', unsafe_allow_html=True)
         with tcol[1]:
             st.markdown(f'<span style="background:#F0E8FA;color:#5B2D8E;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;white-space:nowrap">{s.get("bransje","–")}</span>', unsafe_allow_html=True)
         with tcol[2]:
             st.markdown(f'<span style="font-size:11px;color:#666">{s.get("orgform","–")}</span>', unsafe_allow_html=True)
         with tcol[3]:
-            st.markdown(status_html(s.get("status"), s.get("enk")), unsafe_allow_html=True)
+            status_naa = STATUS_TIL_LABEL.get(s.get("status"), "Går videre")
+            status_valgt = st.selectbox(
+                "Status", STATUS_VALG, index=STATUS_VALG.index(status_naa),
+                key=f"status_sel_{i}_{navn}", label_visibility="collapsed",
+            )
+            ny_status = LABEL_TIL_STATUS[status_valgt]
+            if ny_status != s.get("status"):
+                r[navn]["status"] = ny_status
+                r[navn]["manueltEndret"] = True
+                lagre_lokalt(r)
+                # Trygt å bruke her (testet): statistikk-tallene øverst leses FØR denne
+                # løkken kjører, så uten en ny kjøring ville de vist forrige tall til
+                # neste vilkårlige interaksjon. I motsetning til "Vis detaljer" endrer
+                # ikke dette sidens høyde/struktur nevneverdig, så scroll-posisjonen
+                # bevares uansett – bekreftet med skjermbilde-/scrollTop-testing.
+                st.rerun()
+            if s.get("krevManuellSjekk") and s.get("status") == "inn":
+                st.markdown('<span style="font-size:10px;color:#7A4800">📝 Notat</span>', unsafe_allow_html=True)
+            if s.get("manuellKommentar"):
+                st.markdown('<span style="font-size:10px;color:#0D4A8A">💬 Kommentar</span>', unsafe_allow_html=True)
         with tcol[4]:
-            if s.get("klasse") and s["klasse"] not in ("-","Ukjent"):
-                st.markdown(klasse_html(s["klasse"]), unsafe_allow_html=True)
+            klasse_naa = "ENK" if s.get("enk") else (s.get("klasse") if s.get("klasse") in ("Liten","Medium","Stor") else "Liten")
+            klasse_valgt = st.selectbox(
+                "Klasse", KLASSE_VALG, index=KLASSE_VALG.index(klasse_naa),
+                key=f"klasse_sel_{i}_{navn}", label_visibility="collapsed",
+            )
+            if klasse_valgt != klasse_naa:
+                if klasse_valgt == "ENK":
+                    r[navn]["enk"] = True
+                else:
+                    r[navn]["enk"] = False
+                    r[navn]["klasse"] = klasse_valgt
+                r[navn]["manueltEndret"] = True
+                lagre_lokalt(r)
+                st.rerun()
         with tcol[5]:
             st.markdown(score_html(s.get("total")), unsafe_allow_html=True)
         with tcol[6]:
@@ -1056,13 +1153,18 @@ if side == "📋 Screening":
             else:
                 st.markdown('<span style="color:#ccc;font-size:10px">–</span>', unsafe_allow_html=True)
         with tcol[7]:
+            # Ingen st.rerun() her – knappetrykket trigger allerede en ny kjøring av
+            # scriptet, og session_state.valgt_butikk leses rett under i samme
+            # løkke-iterasjon. Å tvinge frem en ekstra st.rerun() var det som fikk
+            # siden til å hoppe til toppen i stedet for å åpne rett under raden.
             label = "▼ Åpnet" if st.session_state.valgt_butikk == navn else "Vis detaljer"
             if st.button(label, key=f"det_{i}_{navn}", use_container_width=True):
                 if st.session_state.valgt_butikk == navn:
                     st.session_state.valgt_butikk = None
                 else:
                     st.session_state.valgt_butikk = navn
-                st.rerun()
+        if st.session_state.valgt_butikk == navn:
+            vis_detaljpanel(s)
         st.markdown('<hr style="margin:4px 0;border-color:#D8D6D2;opacity:0.4">', unsafe_allow_html=True)
     if vis:
         st.markdown("---")
