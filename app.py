@@ -1044,16 +1044,19 @@ if side == "📋 Screening":
         ("alle","Totalt",len(alle),"#1A1A1A"),
         ("inn","Går videre",sum(1 for s in alle if s.get("status")=="inn" and not s.get("enk")),"#1B6B3A"),
         ("ut","Filtrert ut",sum(1 for s in alle if s.get("status")=="ut" and not s.get("enk")),"#C8102E"),
-        ("usikker","⛔ Bør vurderes ekskludert",sum(1 for s in alle if s.get("status")=="usikker"),"#7A4800"),
+        # Slått sammen fra to separate knapper ("Bør vurderes ekskludert" + "Manuell sjekk") til
+        # én, siden de overlappet og ga forvirring – de 234 alvorlige tilfellene (sitekontroll
+        # feilet / usikker om ekte nettbutikk) er en delmengde av disse 351. Selve årsaken vises
+        # fortsatt per butikk i "Vis detaljer".
         ("manuell_sjekk","📝 Har notat til juryen",sum(1 for s in alle if s.get("krevManuellSjekk")),"#E8A020"),
         ("enk","ENK",sum(1 for s in alle if s.get("enk")),"#C8102E"),
         ("liten","Liten",sum(1 for s in alle if s.get("klasse")=="Liten"),"#0D4A8A"),
         ("medium","Medium",sum(1 for s in alle if s.get("klasse")=="Medium"),"#7A4800"),
         ("stor","Stor",sum(1 for s in alle if s.get("klasse")=="Stor"),"#5B2D8E"),
     ]
-    # Delt i to rader (5 + 4) i stedet for én rad med 9 kolonner – gir dobbelt så mye
-    # bredde per knapp, slik at teksten faktisk får plass uansett skjermbredde/CSS-kvirker.
-    for rad in (filtre_def[:5], filtre_def[5:]):
+    # Delt i to rader (4 + 4) i stedet for én rad – gir mer bredde per knapp, slik at
+    # teksten faktisk får plass uansett skjermbredde/CSS-kvirker.
+    for rad in (filtre_def[:4], filtre_def[4:]):
         radkolonner = st.columns(len(rad))
         for i, (key, label, verdi, farge) in enumerate(rad):
             with radkolonner[i]:
@@ -1073,7 +1076,6 @@ if side == "📋 Screening":
     cf = st.session_state.screening_filter
     if cf == "inn": vis = [s for s in vis if s.get("status")=="inn" and not s.get("enk")]
     elif cf == "ut": vis = [s for s in vis if s.get("status")=="ut" and not s.get("enk")]
-    elif cf == "usikker": vis = [s for s in vis if s.get("status")=="usikker"]
     elif cf == "manuell_sjekk": vis = [s for s in vis if s.get("krevManuellSjekk")]
     elif cf == "enk": vis = [s for s in vis if s.get("enk")]
     elif cf == "liten": vis = [s for s in vis if s.get("klasse")=="Liten"]
