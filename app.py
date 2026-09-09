@@ -1,6 +1,7 @@
 import streamlit as st
 import json
 import os
+import io
 import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
@@ -131,6 +132,67 @@ def last_lokalt():
     except Exception:
         pass
     return {}
+
+TOPP_OVERSTYRING_FIL = "topp_liste_overstyrt.json"
+FASE2_OVERSTYRING_FIL = "fase2_liste_overstyrt.json"
+
+def lagre_overstyring(filnavn, data):
+    try:
+        with open(filnavn, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def last_overstyring(filnavn):
+    try:
+        if os.path.exists(filnavn):
+            with open(filnavn, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return None
+
+EXCEL_KOLONNER = ["Butikk", "URL", "Org.form", "Bransje", "Klasse"]
+
+def lag_excel_nedlasting(rader: list) -> bytes:
+    """Bygger en nedlastbar .xlsx-fil av en liste butikk-rader (samme kolonneform som
+    "Oversikt"-arket i Google Sheets, se sikre_oversikt_seedet)."""
+    df = pd.DataFrame([{
+        "Butikk": r.get("name", ""), "URL": r.get("url", ""), "Org.form": r.get("orgform", ""),
+        "Bransje": r.get("bransje", ""), "Klasse": r.get("klasse", ""),
+    } for r in rader], columns=EXCEL_KOLONNER)
+    buffer = io.BytesIO()
+    df.to_excel(buffer, engine="openpyxl", index=False)
+    return buffer.getvalue()
+
+def les_excel_opplasting(opplastet_fil):
+    """Leser en opplastet .xlsx tilbake til {butikknavn: {url, orgform, bransje, klasse}}.
+    Returnerer None og viser en feilmelding hvis fila mangler "Butikk"-kolonnen."""
+    try:
+        df = pd.read_excel(opplastet_fil, engine="openpyxl")
+    except Exception as e:
+        st.error(f"Kunne ikke lese Excel-filen: {e}")
+        return None
+    if "Butikk" not in df.columns:
+        st.error('Excel-filen må ha en kolonne som heter "Butikk" med butikknavnene.')
+        return None
+    resultat = {}
+    for _, rad in df.iterrows():
+        navn = str(rad.get("Butikk", "")).strip()
+        if not navn or navn == "nan":
+            continue
+        resultat[navn] = {
+            "url": str(rad.get("URL", "") or ""),
+            "orgform": str(rad.get("Org.form", "") or ""),
+            "bransje": str(rad.get("Bransje", "") or ""),
+            "klasse": str(rad.get("Klasse", "") or ""),
+        }
+    return resultat
+
+if "topp_overstyring" not in st.session_state:
+    st.session_state.topp_overstyring = last_overstyring(TOPP_OVERSTYRING_FIL)
+if "fase2_overstyring" not in st.session_state:
+    st.session_state.fase2_overstyring = last_overstyring(FASE2_OVERSTYRING_FIL)
 
 if "resultater" not in st.session_state:
     st.session_state.resultater = last_lokalt()
@@ -379,7 +441,7 @@ def ordne_faner(sh):
 
 
 def sikre_oversikt_seedet(sh, resultater: dict, topp300_navn: list):
-    """Fyller 'Oversikt'-fanen med alle butikkene i Topp 300 automatisk, slik at arket
+    """Fyller 'Oversikt'-fanen med alle butikkene i Topp-listen automatisk, slik at arket
     ser ferdig strukturert ut fra første stund – ikke bare tomt til noen scorer noe.
     Kjøres kun én gang per økt (samme grunn som formateringen over)."""
     if st.session_state.get("_oversikt_seedet"):
@@ -618,11 +680,12 @@ with st.sidebar:
             st.session_state.valgt_butikk = None
 
     st.markdown("---")
-    side = st.radio("Naviger", ["📋 Screening", "⭐ Topp 300", "🧑‍⚖️ Jury", "🏆 Finale", "📦 Logistikk", "ℹ️ Informasjon"], label_visibility="collapsed", key="nav_side")
+    side = st.radio("Naviger", ["📋 Screening", "⭐ Topp 126", "🧑‍⚖️ Fase 1 vurdering", "🎓 Fase 2 Ekspertvurdering", "🏆 Finale", "📦 Logistikk", "ℹ️ Informasjon"], label_visibility="collapsed", key="nav_side")
     NAV_FORKLARING = {
         "📋 Screening": "Alle butikker og deres score, filtrerbart",
-        "⭐ Topp 300": "De 300 butikkene som går videre til juryen",
-        "🧑‍⚖️ Jury": "Vurder butikkene – score og kommentarer",
+        "⭐ Topp 126": "Butikkene som går videre til juryen",
+        "🧑‍⚖️ Fase 1 vurdering": "Vurder butikkene – score og kommentarer",
+        "🎓 Fase 2 Ekspertvurdering": "Kun ditt fagfelt – for de som går videre fra Fase 1",
         "🏆 Finale": "Finalister basert på jury sin vurdering",
         "📦 Logistikk": "Hvem bruker Posten/Bring – salgsmuligheter",
         "ℹ️ Informasjon": "Om kriteriene og hvordan scoring virker",
@@ -736,7 +799,7 @@ def vis_detaljpanel(butikk, juryvurderinger={}):
     st.markdown(
         '<div class="jury-box">'
         '<div style="font-size:14px;font-weight:700;color:#333;margin-bottom:6px">🎯 Juryvurdering</div>'
-        '<div style="font-size:13px;color:#666">Juryvurdering skjer nå i egen fane – gå til <strong>"🧑‍⚖️ Jury"</strong> i menyen til venstre for å score og kommentere denne butikken (data lagres i Google Sheets, ikke her).</div>'
+        '<div style="font-size:13px;color:#666">Juryvurdering skjer nå i egen fane – gå til <strong>"🧑‍⚖️ Fase 1 vurdering"</strong> eller <strong>"🎓 Fase 2 Ekspertvurdering"</strong> i menyen til venstre for å score og kommentere denne butikken (data lagres i Google Sheets, ikke her).</div>'
         '</div>', unsafe_allow_html=True
     )
 
@@ -1173,77 +1236,123 @@ if side == "📋 Screening":
         df = pd.DataFrame([{"Nettbutikk": s.get("name"), "URL": s.get("url",""), "Bransje": s.get("bransje",""), "Status": s.get("status",""), "Klasse": s.get("klasse",""), "Total": s.get("total","")} for s in vis])
         st.download_button("↓ Eksporter CSV", df.to_csv(index=False, sep=";").encode("utf-8-sig"), "screening.csv", "text/csv")
 
-elif side == "⭐ Topp 300":
-    st.header("⭐ Topp 300 – går videre til juryvurdering")
+elif side == "⭐ Topp 126":
+    st.header("⭐ Topp 126 – går videre til juryvurdering")
     if not st.session_state.resultater:
         st.info("Last opp resultater.json i sidepanelet.")
         st.stop()
     r = st.session_state.resultater
     st.caption("Poengsummene fra app-screeningen vises IKKE her – juryen skal vurdere butikkene uten å påvirkes av AI-scoren.")
 
-    def hent_topp300(klasse, n=100):
-        return sorted([v for v in r.values() if v.get("status")=="inn" and not v.get("enk") and v.get("klasse")==klasse and v.get("total") is not None], key=lambda x: x.get("total",0), reverse=True)[:n]
-    liten = hent_topp300("Liten")
-    medium = hent_topp300("Medium")
-    stor = hent_topp300("Stor")
-    alle_topp = liten + medium + stor
+    overstyring = st.session_state.get("topp_overstyring")
+    if overstyring:
+        # En opplastet Excel-fil overstyrer den automatiske beregningen under – dette ER
+        # listen Fase 1 bruker, se punkt 3 i planen (app.py "Fase 1 vurdering"-siden).
+        alle_topp = [{"name": navn, **info} for navn, info in overstyring.items()]
+        liten = [b for b in alle_topp if b.get("klasse") == "Liten"]
+        medium = [b for b in alle_topp if b.get("klasse") == "Medium"]
+        stor = [b for b in alle_topp if b.get("klasse") == "Stor"]
+        st.info(f"📤 Bruker en opplastet, manuelt redigert liste ({len(alle_topp)} butikker) i stedet for den automatiske topp 126.")
+        if st.button("🗑️ Fjern overstyring, bruk automatisk topp 126 igjen"):
+            st.session_state.topp_overstyring = None
+            lagre_overstyring(TOPP_OVERSTYRING_FIL, None)
+            st.rerun()
+    else:
+        def hent_topp126(klasse, n=42):
+            return sorted([v for v in r.values() if v.get("status")=="inn" and not v.get("enk") and v.get("klasse")==klasse and v.get("total") is not None], key=lambda x: x.get("total",0), reverse=True)[:n]
+        liten = hent_topp126("Liten")
+        medium = hent_topp126("Medium")
+        stor = hent_topp126("Stor")
+        alle_topp = liten + medium + stor
     st.session_state["_topp300_navn"] = [b.get("name") for b in alle_topp]
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Totalt i Topp 300", len(alle_topp))
+    col1.metric("Totalt i Topp-listen", len(alle_topp))
     col2.metric("Liten", len(liten))
     col3.metric("Medium", len(medium))
     col4.metric("Stor", len(stor))
     klasse_tab = st.radio("Vis", ["Alle","Liten","Medium","Stor"], horizontal=True)
     vis_liste = {"Liten":liten,"Medium":medium,"Stor":stor}.get(klasse_tab, alle_topp)
+
+    ecol1, ecol2 = st.columns(2)
+    with ecol1:
+        st.download_button(
+            "↓ Eksporter til Excel", data=lag_excel_nedlasting(alle_topp),
+            file_name="topp_liste.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    with ecol2:
+        opplastet_topp = st.file_uploader(
+            "↑ Last opp endret liste (.xlsx)", type=["xlsx"], key="topp_xlsx_upload",
+            help='Rediger den nedlastede Excel-filen (legg til/fjern rader) og last den opp igjen – da blir DET listen som brukes i Fase 1.',
+        )
+        if opplastet_topp is not None:
+            ny_overstyring = les_excel_opplasting(opplastet_topp)
+            if ny_overstyring:
+                st.session_state.topp_overstyring = ny_overstyring
+                lagre_overstyring(TOPP_OVERSTYRING_FIL, ny_overstyring)
+                st.success(f"✅ {len(ny_overstyring)} butikker lastet inn som ny liste!")
+                st.rerun()
     st.markdown("---")
 
-    def _hopp_til_jury(navn_valgt):
-        st.session_state["_jury_valgt_butikk"] = navn_valgt
-        st.session_state.nav_side = "🧑‍⚖️ Jury"
+    tabell_df = pd.DataFrame([{
+        "Butikk": b.get("name",""), "Klasse": b.get("klasse","–"), "Bransje": b.get("bransje","–"),
+        "Org.form": b.get("orgform","–"), "URL": b.get("url",""),
+    } for b in vis_liste])
 
-    for butikk in vis_liste:
-        navn = butikk.get("name","")
-        c1, c2 = st.columns([4,1])
-        with c1:
-            st.markdown(f"**{navn}** — {butikk.get('klasse','')} · {butikk.get('bransje','–')}")
-            if butikk.get("url"): st.caption(f'🌐 {butikk["url"]}')
-        with c2:
-            st.button("🧑‍⚖️ Til jury", key=f"tj300_{navn}", on_click=_hopp_til_jury, args=(navn,))
-        st.markdown("---")
+    def _hopp_til_jury_fra_tabell():
+        # Kjøres som on_select-callback (FØR selve rerunen) – i motsetning til å lese
+        # valget etter at st.dataframe() har returnert, unngår dette
+        # "st.session_state.nav_side cannot be modified after the widget with key
+        # nav_side is instantiated"-feilen, siden sidepanelets meny-radio allerede er
+        # tegnet på dette tidspunktet i skriptet.
+        rader = st.session_state.get("topp_tabell", {}).get("selection", {}).get("rows", [])
+        if rader:
+            navn_valgt = tabell_df.iloc[rader[0]]["Butikk"]
+            st.session_state["_jury_valgt_butikk"] = navn_valgt
+            st.session_state.nav_side = "🧑‍⚖️ Fase 1 vurdering"
 
-elif side == "🧑‍⚖️ Jury":
-    st.header("🧑‍⚖️ Jury – vurdering av butikker")
-    if not st.session_state.resultater:
-        st.info("Last opp resultater.json i sidepanelet.")
-        st.stop()
-    r = st.session_state.resultater
+    st.caption("Trykk på en rad for å hoppe rett til den butikken i Fase 1 vurdering.")
+    st.dataframe(
+        tabell_df, use_container_width=True, hide_index=True,
+        selection_mode="single-row", on_select=_hopp_til_jury_fra_tabell, key="topp_tabell",
+    )
 
-    sh = koble_gsheets()
-    if not sh:
-        st.error("Kunne ikke koble til Google Sheets. Sjekk at 'gcp_service_account' og 'google_sheets' er satt riktig i Secrets.")
-        if st.session_state.get("_gsheets_feil"):
-            st.caption(f"Feilmelding: {st.session_state['_gsheets_feil']}")
-        st.stop()
-
-    FASE_NAVN = {1: "Fase 1 – Jury", 2: "Fase 2 – Ekspertvurdering"}
-    jc1, jc2 = st.columns([1, 2])
-    with jc1:
-        runde = st.selectbox("Fase", [1, 2], format_func=lambda x: FASE_NAVN[x])
-    with jc2:
-        jurynavn = st.text_input("Ditt navn (jurymedlem)", value=st.session_state.get("_jurynavn", ""), placeholder="Skriv navnet ditt her")
-        st.session_state["_jurynavn"] = jurynavn
-
+def vis_juryside(sh, r, runde):
+    """Delt innhold for Fase 1 vurdering (runde=1) og Fase 2 Ekspertvurdering (runde=2) –
+    samme logikk som den tidligere samlede "🧑‍⚖️ Jury"-siden, nå som egen funksjon slik at
+    de to menyvalgene ikke trenger å duplisere 100+ linjer kode som lett kan divergere."""
+    jurynavn = st.text_input("Ditt navn (jurymedlem)", value=st.session_state.get("_jurynavn", ""), placeholder="Skriv navnet ditt her")
+    st.session_state["_jurynavn"] = jurynavn
     if not jurynavn:
         st.warning("Skriv inn navnet ditt over for å begynne å vurdere.")
         st.stop()
 
     fagfelt_valgt = None
+    fase2_overstyring = None
     if runde == 2:
         st.info("💡 I Ekspertvurdering vurderer du KUN ditt eget fagfelt – ikke alle 5 kategoriene. Din score erstatter Fase 1 sin score for akkurat den kategorien når finalistene beregnes.")
         alle_kategorinavn = [kat for kat, _, _ in STANDARD_KRITERIER_RUNDE1]
         unike_kategorier = list(dict.fromkeys(alle_kategorinavn))
         fagfelt_valgt = st.selectbox("Ditt fagfelt (kategorien du er ekspert på)", unike_kategorier)
+
+        fase2_overstyring = st.session_state.get("fase2_overstyring")
+        with st.expander("📤 Last opp butikkliste for denne fasen (Excel)", expanded=not fase2_overstyring):
+            st.caption('Excel-filen bør ha kolonnene "Butikk", "URL", "Org.form", "Bransje", "Klasse" – full info brukes direkte, uavhengig av resultater.json.')
+            if fase2_overstyring:
+                st.success(f"✅ Bruker en opplastet liste med {len(fase2_overstyring)} butikker.")
+                if st.button("🗑️ Fjern opplastet liste, bruk automatisk utregning igjen"):
+                    st.session_state.fase2_overstyring = None
+                    lagre_overstyring(FASE2_OVERSTYRING_FIL, None)
+                    st.rerun()
+            opplastet_fase2 = st.file_uploader("Excel-fil (.xlsx)", type=["xlsx"], key="fase2_xlsx_upload")
+            if opplastet_fase2 is not None:
+                ny_fase2 = les_excel_opplasting(opplastet_fase2)
+                if ny_fase2:
+                    st.session_state.fase2_overstyring = ny_fase2
+                    lagre_overstyring(FASE2_OVERSTYRING_FIL, ny_fase2)
+                    st.success(f"✅ {len(ny_fase2)} butikker lastet inn!")
+                    st.rerun()
 
     with st.expander("⚙️ Innstillinger for denne fasen (hvor mange går videre til neste fase, per klasse)"):
         gjeldende_cutoff = hent_cutoff(sh, runde)
@@ -1257,12 +1366,15 @@ elif side == "🧑‍⚖️ Jury":
 
     topp300_navn = st.session_state.get("_topp300_navn")
     if not topp300_navn:
-        topp300_navn = sorted([v.get("name") for v in r.values() if v.get("status")=="inn" and not v.get("enk") and v.get("total") is not None], key=lambda n: r[n].get("total",0), reverse=True)[:300]
+        topp300_navn = sorted([v.get("name") for v in r.values() if v.get("status")=="inn" and not v.get("enk") and v.get("total") is not None], key=lambda n: r[n].get("total",0), reverse=True)[:126]
 
     with st.spinner("Henter aktive butikker for denne runden..."):
         sikre_oversikt_seedet(sh, r, topp300_navn)
         ordne_faner(sh)
-        aktive_navn = hent_aktive_butikker_for_runde(sh, r, runde, topp300_navn)
+        if fase2_overstyring:
+            aktive_navn = list(fase2_overstyring.keys())
+        else:
+            aktive_navn = hent_aktive_butikker_for_runde(sh, r, runde, topp300_navn)
         kriterier = hent_kriterier(sh, runde)
         mine_vurderinger = {v["Butikk"] + "|" + v["Kriterium"]: v for v in hent_vurderinger(sh, runde) if v.get("Jurymedlem") == jurynavn}
 
@@ -1311,7 +1423,7 @@ elif side == "🧑‍⚖️ Jury":
     kriterier_for_fullforingssjekk = [(kat, krit) for kat, kritliste in kategorier_gruppert.items() for krit in kritliste]
 
     for navn in vis_navn[:30]:  # begrens antall vist samtidig for ytelse
-        butikk = r.get(navn, {})
+        butikk = (fase2_overstyring.get(navn, {}) if fase2_overstyring else r.get(navn, {}))
         alt_ferdig = all((navn + "|" + krit) in mine_vurderinger for _, krit in kriterier_for_fullforingssjekk)
         merke = "✅" if alt_ferdig else ""
         with st.expander(f"{merke} **{navn}** — {butikk.get('orgform','–')} · {butikk.get('bransje','–')} · {butikk.get('klasse','–')}"):
@@ -1340,6 +1452,30 @@ elif side == "🧑‍⚖️ Jury":
                         lagre_vurdering(sh, navn, jurynavn, runde, kat, krit, score, kommentar)
                 st.success(f"Lagret vurderinger for {navn}!")
                 st.rerun()
+
+
+def _sjekk_gsheets_og_resultater():
+    if not st.session_state.resultater:
+        st.info("Last opp resultater.json i sidepanelet.")
+        st.stop()
+    sh = koble_gsheets()
+    if not sh:
+        st.error("Kunne ikke koble til Google Sheets. Sjekk at 'gcp_service_account' og 'google_sheets' er satt riktig i Secrets.")
+        if st.session_state.get("_gsheets_feil"):
+            st.caption(f"Feilmelding: {st.session_state['_gsheets_feil']}")
+        st.stop()
+    return sh
+
+
+if side == "🧑‍⚖️ Fase 1 vurdering":
+    st.header("🧑‍⚖️ Fase 1 vurdering – jury")
+    sh = _sjekk_gsheets_og_resultater()
+    vis_juryside(sh, st.session_state.resultater, runde=1)
+
+elif side == "🎓 Fase 2 Ekspertvurdering":
+    st.header("🎓 Fase 2 – Ekspertvurdering")
+    sh = _sjekk_gsheets_og_resultater()
+    vis_juryside(sh, st.session_state.resultater, runde=2)
 
 elif side == "🏆 Finale":
     st.header("🏆 Finale – Fase 1 (jury) kombinert med Fase 2 (ekspertvurdering)")
