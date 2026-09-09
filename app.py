@@ -266,18 +266,57 @@ TOPP_ARK_GID = 786736978
 
 
 @st.cache_resource(ttl=3600, show_spinner=False)
-def koble_topp_ark():
-    """Åpner den spesifikke fanen Topp-listen skal speiles til – kan være et annet
-    regneark enn juryens hoved-Sheets, derfor et eget oppslag (ikke bare koble_gsheets())."""
+@st.cache_resource(ttl=3600, show_spinner=False)
+def koble_topp_spreadsheet():
+    """Åpner selve regneark-dokumentet Topp-listen er koblet til – kan være et annet
+    dokument enn juryens hoved-Sheets, derfor et eget oppslag (ikke bare koble_gsheets())."""
     gc = _gc_klient()
     if not gc:
         return None
     try:
-        sh = gc.open_by_key(TOPP_ARK_ID)
-        return sh.get_worksheet_by_id(TOPP_ARK_GID)
+        return gc.open_by_key(TOPP_ARK_ID)
     except Exception as e:
         st.session_state["_topp_ark_feil"] = str(e)
         return None
+
+
+def koble_topp_ark():
+    """Åpner den spesifikke fanen (utpekt ved GID) i Topp-listens regneark – den rike
+    visningen med kriterier, se bygg_rangeringsvisning()."""
+    sh_topp = koble_topp_spreadsheet()
+    if not sh_topp:
+        return None
+    try:
+        return sh_topp.get_worksheet_by_id(TOPP_ARK_GID)
+    except Exception as e:
+        st.session_state["_topp_ark_feil"] = str(e)
+        return None
+
+
+TOPP_ENKEL_FANE_NAVN = "Topp – enkel oversikt"
+
+
+def skriv_enkel_topp_oversikt(sh_topp, rader):
+    """Fyller en enkel, egen fane (kun butikk/URL/org.form/bransje/klasse – ingen
+    kriterier) i Topp-listens regneark, som et raskt overblikk ved siden av den rike
+    kriterie-koblede fanen (koble_topp_ark())."""
+    ws = hent_eller_lag_ark(sh_topp, TOPP_ENKEL_FANE_NAVN, EXCEL_KOLONNER)
+    verdier = [EXCEL_KOLONNER] + [[
+        r.get("name",""), r.get("url",""), r.get("orgform",""), r.get("bransje",""), r.get("klasse",""),
+    ] for r in rader]
+    ws.clear()
+    ws.update("A1", verdier)
+    try:
+        ws.format("A1:E1", {
+            "backgroundColor": {"red": 0.784, "green": 0.063, "blue": 0.184},
+            "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}, "fontSize": 11},
+            "horizontalAlignment": "CENTER",
+        })
+        ws.freeze(rows=1)
+        ws.columns_auto_resize(0, 4)
+    except Exception:
+        pass
+    return ws
 
 
 def hent_eller_lag_ark(sh, navn, headers):
@@ -1398,11 +1437,14 @@ elif side == "⭐ Topp":
     # fra juryens hoved-Sheets (koble_gsheets()), i tillegg til selve Topp-fanen.
     def _oppdater_topp_ark():
         sh_hoved = koble_gsheets()
+        sh_topp = koble_topp_spreadsheet()
         _topp_ws = koble_topp_ark()
-        if not sh_hoved or not _topp_ws:
+        if not sh_hoved or not sh_topp or not _topp_ws:
             return False
         navn_liste = [b.get("name") for b in alle_topp]
-        return bygg_rangeringsvisning(sh_hoved, 1, r, navn_liste, ws_override=_topp_ws) is not None
+        ok = bygg_rangeringsvisning(sh_hoved, 1, r, navn_liste, ws_override=_topp_ws) is not None
+        skriv_enkel_topp_oversikt(sh_topp, alle_topp)  # egen, enkel fane – se TOPP_ENKEL_FANE_NAVN
+        return ok
 
     import time as _time
     siste_topp_ark_oppdatering = st.session_state.get("_topp_ark_siste_oppdatering", 0)
