@@ -581,8 +581,17 @@ def _fjern_betinget_formatering(sh, ws):
 
 def _fargelegg_vurdert_kolonne(sh, ws, antall_rader, vurdert_kol_index=1):
     """Gir "Vurdert?"-kolonnen ekte grønn/rød bakgrunnsfarge (ikke bare ✅/❌ som ren
-    tekst) – grønn boks når butikken er vurdert, rød når den ikke er det ennå."""
+    tekst) – grønn boks når butikken er vurdert, rød når den ikke er det ennå.
+
+    Kjøres kun ÉN gang per faneblad per økt (reglene ligger værende i selve regnearket
+    etterpå og trenger ikke settes på nytt hver gang siden bygges om igjen hvert 90.
+    sekund) – ellers gjør dette to ekstra, tunge API-kall (fetch_sheet_metadata +
+    batch_update) ved HVER oppdatering, noe som fort sprenger Google sin kvote når flere
+    faner/sider oppdaterer seg samtidig."""
     if antall_rader <= 0:
+        return
+    okt_nokkel = f"_vurdert_farge_satt_{ws.id}"
+    if st.session_state.get(okt_nokkel):
         return
     _fjern_betinget_formatering(sh, ws)
     omraade = {"sheetId": ws.id, "startRowIndex": 2, "endRowIndex": 2 + antall_rader,
@@ -608,6 +617,7 @@ def _fargelegg_vurdert_kolonne(sh, ws, antall_rader, vurdert_kol_index=1):
         ]})
     except Exception:
         pass
+    st.session_state[okt_nokkel] = True
 
 
 def bygg_rangeringsvisning(sh, runde: int, resultater: dict, aktive_navn: list, ark_navn: str = "Rangering", ws_override=None):
@@ -1378,7 +1388,6 @@ elif side == "⭐ Topp":
         st.info("Last opp resultater.json i sidepanelet.")
         st.stop()
     r = st.session_state.resultater
-    st.caption("Poengsummene fra app-screeningen vises IKKE her – juryen skal vurdere butikkene uten å påvirkes av AI-scoren.")
 
     overstyring = st.session_state.get("topp_overstyring")
     if overstyring:
@@ -1430,21 +1439,19 @@ elif side == "⭐ Topp":
                 st.success(f"✅ {len(ny_overstyring)} butikker lastet inn som ny liste!")
                 st.rerun()
 
-    # Speiler samme liste inn i den utpekte Google Sheets-fanen (se koble_topp_ark()) –
-    # Excel-filen over er fortsatt selve mekanismen for opplasting/overstyring. Fanen får
-    # samme rike struktur som Rangering (kriterier som kolonner, levende koblet til
-    # Vurderinger), ikke bare en enkel butikkliste – derfor trengs også Kriterier-arket
-    # fra juryens hoved-Sheets (koble_gsheets()), i tillegg til selve Topp-fanen.
+    # Speiler samme liste inn i den enkle oversiktsfanen (TOPP_ENKEL_FANE_NAVN) i det
+    # utpekte regnearket. NB: den rike, kriterie-koblede varianten (bygg_rangeringsvisning
+    # mot koble_topp_ark()) er MIDLERTIDIG fjernet herfra – den bygger sannsynligvis opp
+    # den samme fanen som Fase 1-siden allerede holder oppdatert, og de to sammen gjorde
+    # for mange Google Sheets-API-kall (se APIError-feilen som oppstod). Legges tilbake
+    # her når det er avklart om dette faktisk er en egen fane eller samme som "Rangering
+    # Fase 1".
     def _oppdater_topp_ark():
-        sh_hoved = koble_gsheets()
         sh_topp = koble_topp_spreadsheet()
-        _topp_ws = koble_topp_ark()
-        if not sh_hoved or not sh_topp or not _topp_ws:
+        if not sh_topp:
             return False
-        navn_liste = [b.get("name") for b in alle_topp]
-        ok = bygg_rangeringsvisning(sh_hoved, 1, r, navn_liste, ws_override=_topp_ws) is not None
-        skriv_enkel_topp_oversikt(sh_topp, alle_topp)  # egen, enkel fane – se TOPP_ENKEL_FANE_NAVN
-        return ok
+        skriv_enkel_topp_oversikt(sh_topp, alle_topp)
+        return True
 
     import time as _time
     siste_topp_ark_oppdatering = st.session_state.get("_topp_ark_siste_oppdatering", 0)
