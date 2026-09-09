@@ -280,27 +280,6 @@ def koble_topp_ark():
         return None
 
 
-def skriv_topp_liste_til_ark(ws, rader):
-    """Speiler Topp-listen inn i den utpekte Google Sheets-fanen, med samme visuelle
-    struktur (farget overskrift, frosset toppmeny, autotilpasset bredde) som
-    formater_oversikt_ark()/bygg_rangeringsvisning() bruker andre steder i appen."""
-    verdier = [EXCEL_KOLONNER] + [[
-        r.get("name",""), r.get("url",""), r.get("orgform",""), r.get("bransje",""), r.get("klasse",""),
-    ] for r in rader]
-    ws.clear()
-    ws.update(verdier)
-    try:
-        ws.format("A1:E1", {
-            "backgroundColor": {"red": 0.784, "green": 0.063, "blue": 0.184},
-            "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}, "fontSize": 11},
-            "horizontalAlignment": "CENTER",
-        })
-        ws.freeze(rows=1)
-        ws.columns_auto_resize(0, 4)
-    except Exception:
-        pass
-
-
 def hent_eller_lag_ark(sh, navn, headers):
     """Henter et faneblad hvis det finnes, oppretter det med riktige kolonneoverskrifter hvis ikke."""
     try:
@@ -542,11 +521,65 @@ def _kolonnebokstav(n: int) -> str:
     return bokstav
 
 
-def bygg_rangeringsvisning(sh, runde: int, resultater: dict, aktive_navn: list, ark_navn: str = "Rangering"):
+def _fjern_betinget_formatering(sh, ws):
+    """Fjerner all eksisterende betinget formatering på arket – kjøres alltid rett før nye
+    regler legges til, slik at reglene ikke hoper seg opp for hver gang siden bygges på
+    nytt (hvert 90. sekund + ved manuell oppdatering)."""
+    try:
+        meta = sh.fetch_sheet_metadata()
+        for sheet in meta.get("sheets", []):
+            if sheet.get("properties", {}).get("sheetId") == ws.id:
+                antall = len(sheet.get("conditionalFormats", []))
+                if antall:
+                    sh.batch_update({"requests": [
+                        {"deleteConditionalFormatRule": {"sheetId": ws.id, "index": i}}
+                        for i in range(antall - 1, -1, -1)
+                    ]})
+                break
+    except Exception:
+        pass
+
+
+def _fargelegg_vurdert_kolonne(sh, ws, antall_rader, vurdert_kol_index=1):
+    """Gir "Vurdert?"-kolonnen ekte grønn/rød bakgrunnsfarge (ikke bare ✅/❌ som ren
+    tekst) – grønn boks når butikken er vurdert, rød når den ikke er det ennå."""
+    if antall_rader <= 0:
+        return
+    _fjern_betinget_formatering(sh, ws)
+    omraade = {"sheetId": ws.id, "startRowIndex": 2, "endRowIndex": 2 + antall_rader,
+               "startColumnIndex": vurdert_kol_index, "endColumnIndex": vurdert_kol_index + 1}
+    try:
+        sh.batch_update({"requests": [
+            {"addConditionalFormatRule": {"index": 0, "rule": {
+                "ranges": [omraade],
+                "booleanRule": {
+                    "condition": {"type": "TEXT_EQ", "values": [{"userEnteredValue": "✅"}]},
+                    "format": {"backgroundColor": {"red": 0.85, "green": 0.95, "blue": 0.87},
+                               "textFormat": {"foregroundColor": {"red": 0.11, "green": 0.42, "blue": 0.23}, "bold": True}},
+                },
+            }}},
+            {"addConditionalFormatRule": {"index": 0, "rule": {
+                "ranges": [omraade],
+                "booleanRule": {
+                    "condition": {"type": "TEXT_EQ", "values": [{"userEnteredValue": "❌"}]},
+                    "format": {"backgroundColor": {"red": 0.99, "green": 0.86, "blue": 0.86},
+                               "textFormat": {"foregroundColor": {"red": 0.78, "green": 0.06, "blue": 0.18}, "bold": True}},
+                },
+            }}},
+        ]})
+    except Exception:
+        pass
+
+
+def bygg_rangeringsvisning(sh, runde: int, resultater: dict, aktive_navn: list, ark_navn: str = "Rangering", ws_override=None):
     """
     Bygger en Rangering-fane (navn valgfritt via ark_navn, slik at hver fase kan ha sin
     EGEN fane i stedet for at de overskriver hverandre) med LEVENDE Google Sheets-formler.
     Kolonner: Butikk | Vurdert? | Klasse | URL (klikkbar) | ...kriterier... | Snitt totalt
+
+    ws_override: send inn et allerede åpnet Worksheet-objekt for å bygge denne visningen
+    et annet sted enn en fane oppslått på navn (f.eks. Topp-listens utpekte regneark-fane,
+    identifisert ved GID i stedet for navn – se koble_topp_ark()).
     """
     kriterier = hent_kriterier(sh, runde)
     if not kriterier:
@@ -608,11 +641,15 @@ def bygg_rangeringsvisning(sh, runde: int, resultater: dict, aktive_navn: list, 
     alle_rader = [rad1, rad2] + databader
 
     try:
-        try:
-            ws = sh.worksheet(ark_navn)
+        if ws_override is not None:
+            ws = ws_override
             ws.clear()
-        except gspread.WorksheetNotFound:
-            ws = sh.add_worksheet(title=ark_navn, rows=len(alle_rader) + 10, cols=len(rad1) + 2)
+        else:
+            try:
+                ws = sh.worksheet(ark_navn)
+                ws.clear()
+            except gspread.WorksheetNotFound:
+                ws = sh.add_worksheet(title=ark_navn, rows=len(alle_rader) + 10, cols=len(rad1) + 2)
 
         ws.update("A1", alle_rader, value_input_option="USER_ENTERED")  # USER_ENTERED = tolkes som formler
 
@@ -656,6 +693,10 @@ def bygg_rangeringsvisning(sh, runde: int, resultater: dict, aktive_navn: list, 
         ws.merge_cells(f"{siste_kol}1:{siste_kol}2")
         ws.freeze(rows=2, cols=4)
         ws.columns_auto_resize(0, len(rad1) - 1)
+        # ws kan tilhøre et ANNET regneark enn sh (ved ws_override, f.eks. Topp-listens
+        # utpekte fane) – bruk alltid ws.spreadsheet for arkoperasjoner som virker på
+        # riktig dokument, uavhengig av hvilket sh som ble sendt inn for kriteriene.
+        _fargelegg_vurdert_kolonne(ws.spreadsheet, ws, len(databader))
         return ws
     except Exception as e:
         st.session_state["_rangering_feil"] = str(e)
@@ -1351,25 +1392,32 @@ elif side == "⭐ Topp":
                 st.rerun()
 
     # Speiler samme liste inn i den utpekte Google Sheets-fanen (se koble_topp_ark()) –
-    # Excel-filen over er fortsatt selve mekanismen for opplasting/overstyring, dette er
-    # kun en ekstra, alltid oppdatert visning for de som foretrekker å se den i regnearket.
+    # Excel-filen over er fortsatt selve mekanismen for opplasting/overstyring. Fanen får
+    # samme rike struktur som Rangering (kriterier som kolonner, levende koblet til
+    # Vurderinger), ikke bare en enkel butikkliste – derfor trengs også Kriterier-arket
+    # fra juryens hoved-Sheets (koble_gsheets()), i tillegg til selve Topp-fanen.
+    def _oppdater_topp_ark():
+        sh_hoved = koble_gsheets()
+        _topp_ws = koble_topp_ark()
+        if not sh_hoved or not _topp_ws:
+            return False
+        navn_liste = [b.get("name") for b in alle_topp]
+        return bygg_rangeringsvisning(sh_hoved, 1, r, navn_liste, ws_override=_topp_ws) is not None
+
     import time as _time
     siste_topp_ark_oppdatering = st.session_state.get("_topp_ark_siste_oppdatering", 0)
     if _time.time() - siste_topp_ark_oppdatering > 90:
-        _topp_ws = koble_topp_ark()
-        if _topp_ws:
-            skriv_topp_liste_til_ark(_topp_ws, alle_topp)
+        _oppdater_topp_ark()
         st.session_state["_topp_ark_siste_oppdatering"] = _time.time()
     if st.button("🎨 Oppdater Google Sheets-fanen nå"):
         with st.spinner("Skriver til regnearket..."):
-            _topp_ws = koble_topp_ark()
-            if _topp_ws:
-                skriv_topp_liste_til_ark(_topp_ws, alle_topp)
-                st.session_state["_topp_ark_siste_oppdatering"] = _time.time()
-                st.success("✅ Ferdig! Se den utpekte fanen i Google Sheets.")
-            else:
-                feilmelding = st.session_state.get('_topp_ark_feil') or st.session_state.get('_gsheets_feil') or 'ukjent'
-                st.error(f"Kunne ikke koble til regnearket. Feilmelding: {feilmelding}")
+            ok = _oppdater_topp_ark()
+            st.session_state["_topp_ark_siste_oppdatering"] = _time.time()
+        if ok:
+            st.success("✅ Ferdig! Se den utpekte fanen i Google Sheets.")
+        else:
+            feilmelding = st.session_state.get('_topp_ark_feil') or st.session_state.get('_gsheets_feil') or st.session_state.get('_rangering_feil') or 'ukjent'
+            st.error(f"Kunne ikke koble til regnearket. Feilmelding: {feilmelding}")
     st.markdown("---")
 
     tabell_df = pd.DataFrame([{
