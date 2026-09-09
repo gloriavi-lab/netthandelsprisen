@@ -230,19 +230,75 @@ KLASSER = ["Liten", "Medium", "Stor"]
 
 
 @st.cache_resource(ttl=3600, show_spinner=False)
-def koble_gsheets():
-    """Kobler til hele Google Sheet-et (ikke bare ett faneblad). Returnerer None ved feil.
-    Mellomlagres i 1 time – uten dette kobles det til Google på nytt ved HVER interaksjon
-    i appen, noe som raskt sprenger API-kvoten."""
+def _gc_klient():
+    """Den autoriserte Google-klienten, delt mellom koble_gsheets() (juryens hoved-Sheets)
+    og koble_topp_ark() (Topp-listens regneark, som kan være et annet dokument) – slik
+    trengs kun én innlogging selv om appen snakker med to forskjellige regneark."""
     try:
         creds_info = st.secrets["gcp_service_account"]
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
         creds = Credentials.from_service_account_info(creds_info, scopes=scope)
-        gc = gspread.authorize(creds)
+        return gspread.authorize(creds)
+    except Exception as e:
+        st.session_state["_gsheets_feil"] = str(e)
+        return None
+
+
+@st.cache_resource(ttl=3600, show_spinner=False)
+def koble_gsheets():
+    """Kobler til hele Google Sheet-et (ikke bare ett faneblad). Returnerer None ved feil.
+    Mellomlagres i 1 time – uten dette kobles det til Google på nytt ved HVER interaksjon
+    i appen, noe som raskt sprenger API-kvoten."""
+    gc = _gc_klient()
+    if not gc:
+        return None
+    try:
         return gc.open_by_key(st.secrets["google_sheets"]["sheet_id"])
     except Exception as e:
         st.session_state["_gsheets_feil"] = str(e)
         return None
+
+
+# Regnearket/fanen brukeren har pekt ut for Topp-listen, se
+# https://docs.google.com/spreadsheets/d/1NFvVHWf5DjHedCQ3F4wp1UE1B4hSuYdlIrSSJUTVzJw/edit?gid=786736978
+TOPP_ARK_ID = "1NFvVHWf5DjHedCQ3F4wp1UE1B4hSuYdlIrSSJUTVzJw"
+TOPP_ARK_GID = 786736978
+
+
+@st.cache_resource(ttl=3600, show_spinner=False)
+def koble_topp_ark():
+    """Åpner den spesifikke fanen Topp-listen skal speiles til – kan være et annet
+    regneark enn juryens hoved-Sheets, derfor et eget oppslag (ikke bare koble_gsheets())."""
+    gc = _gc_klient()
+    if not gc:
+        return None
+    try:
+        sh = gc.open_by_key(TOPP_ARK_ID)
+        return sh.get_worksheet_by_id(TOPP_ARK_GID)
+    except Exception as e:
+        st.session_state["_topp_ark_feil"] = str(e)
+        return None
+
+
+def skriv_topp_liste_til_ark(ws, rader):
+    """Speiler Topp-listen inn i den utpekte Google Sheets-fanen, med samme visuelle
+    struktur (farget overskrift, frosset toppmeny, autotilpasset bredde) som
+    formater_oversikt_ark()/bygg_rangeringsvisning() bruker andre steder i appen."""
+    verdier = [EXCEL_KOLONNER] + [[
+        r.get("name",""), r.get("url",""), r.get("orgform",""), r.get("bransje",""), r.get("klasse",""),
+    ] for r in rader]
+    ws.clear()
+    ws.update(verdier)
+    try:
+        ws.format("A1:E1", {
+            "backgroundColor": {"red": 0.784, "green": 0.063, "blue": 0.184},
+            "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}, "fontSize": 11},
+            "horizontalAlignment": "CENTER",
+        })
+        ws.freeze(rows=1)
+        ws.columns_auto_resize(0, 4)
+    except Exception:
+        pass
 
 
 def hent_eller_lag_ark(sh, navn, headers):
@@ -680,10 +736,10 @@ with st.sidebar:
             st.session_state.valgt_butikk = None
 
     st.markdown("---")
-    side = st.radio("Naviger", ["📋 Screening", "⭐ Topp 126", "🧑‍⚖️ Fase 1 vurdering", "🎓 Fase 2 Ekspertvurdering", "🏆 Finale", "📦 Logistikk", "ℹ️ Informasjon"], label_visibility="collapsed", key="nav_side")
+    side = st.radio("Naviger", ["📋 Screening", "⭐ Topp", "🧑‍⚖️ Fase 1 vurdering", "🎓 Fase 2 Ekspertvurdering", "🏆 Finale", "📦 Logistikk", "ℹ️ Informasjon"], label_visibility="collapsed", key="nav_side")
     NAV_FORKLARING = {
         "📋 Screening": "Alle butikker og deres score, filtrerbart",
-        "⭐ Topp 126": "Butikkene som går videre til juryen",
+        "⭐ Topp": "Butikkene som går videre til juryen",
         "🧑‍⚖️ Fase 1 vurdering": "Vurder butikkene – score og kommentarer",
         "🎓 Fase 2 Ekspertvurdering": "Kun ditt fagfelt – for de som går videre fra Fase 1",
         "🏆 Finale": "Finalister basert på jury sin vurdering",
@@ -1111,7 +1167,7 @@ if side == "📋 Screening":
         # én, siden de overlappet og ga forvirring – de 234 alvorlige tilfellene (sitekontroll
         # feilet / usikker om ekte nettbutikk) er en delmengde av disse 351. Selve årsaken vises
         # fortsatt per butikk i "Vis detaljer".
-        ("manuell_sjekk","📝 Har notat til juryen",sum(1 for s in alle if s.get("krevManuellSjekk")),"#E8A020"),
+        ("manuell_sjekk","⚠️ Manuell sjekk kreves",sum(1 for s in alle if s.get("krevManuellSjekk")),"#E8A020"),
         ("enk","ENK",sum(1 for s in alle if s.get("enk")),"#C8102E"),
         ("liten","Liten",sum(1 for s in alle if s.get("klasse")=="Liten"),"#0D4A8A"),
         ("medium","Medium",sum(1 for s in alle if s.get("klasse")=="Medium"),"#7A4800"),
@@ -1236,7 +1292,7 @@ if side == "📋 Screening":
         df = pd.DataFrame([{"Nettbutikk": s.get("name"), "URL": s.get("url",""), "Bransje": s.get("bransje",""), "Status": s.get("status",""), "Klasse": s.get("klasse",""), "Total": s.get("total","")} for s in vis])
         st.download_button("↓ Eksporter CSV", df.to_csv(index=False, sep=";").encode("utf-8-sig"), "screening.csv", "text/csv")
 
-elif side == "⭐ Topp 126":
+elif side == "⭐ Topp":
     st.header("⭐ Topp 126 – går videre til juryvurdering")
     if not st.session_state.resultater:
         st.info("Last opp resultater.json i sidepanelet.")
@@ -1293,6 +1349,27 @@ elif side == "⭐ Topp 126":
                 lagre_overstyring(TOPP_OVERSTYRING_FIL, ny_overstyring)
                 st.success(f"✅ {len(ny_overstyring)} butikker lastet inn som ny liste!")
                 st.rerun()
+
+    # Speiler samme liste inn i den utpekte Google Sheets-fanen (se koble_topp_ark()) –
+    # Excel-filen over er fortsatt selve mekanismen for opplasting/overstyring, dette er
+    # kun en ekstra, alltid oppdatert visning for de som foretrekker å se den i regnearket.
+    import time as _time
+    siste_topp_ark_oppdatering = st.session_state.get("_topp_ark_siste_oppdatering", 0)
+    if _time.time() - siste_topp_ark_oppdatering > 90:
+        _topp_ws = koble_topp_ark()
+        if _topp_ws:
+            skriv_topp_liste_til_ark(_topp_ws, alle_topp)
+        st.session_state["_topp_ark_siste_oppdatering"] = _time.time()
+    if st.button("🎨 Oppdater Google Sheets-fanen nå"):
+        with st.spinner("Skriver til regnearket..."):
+            _topp_ws = koble_topp_ark()
+            if _topp_ws:
+                skriv_topp_liste_til_ark(_topp_ws, alle_topp)
+                st.session_state["_topp_ark_siste_oppdatering"] = _time.time()
+                st.success("✅ Ferdig! Se den utpekte fanen i Google Sheets.")
+            else:
+                feilmelding = st.session_state.get('_topp_ark_feil') or st.session_state.get('_gsheets_feil') or 'ukjent'
+                st.error(f"Kunne ikke koble til regnearket. Feilmelding: {feilmelding}")
     st.markdown("---")
 
     tabell_df = pd.DataFrame([{
