@@ -491,6 +491,42 @@ def lagre_manuelle_endringer(sh, endrede_butikker: dict):
     return len(endrede_butikker)
 
 
+TOPP_OVERSTYRING_KOLONNER = ["Butikk", "Handling", "Tidsstempel"]
+
+
+def hent_topp_overstyring_ark(sh):
+    return hent_eller_lag_ark(sh, "Topp overstyring", TOPP_OVERSTYRING_KOLONNER)
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def hent_topp_overstyring(_sh) -> dict:
+    """Butikker jury manuelt har fjernet fra eller lagt til i Topp 126 direkte i appen
+    (ikke via Excel-runden) – delt mellom ALLE via Google Sheets, samme mønster som de
+    manuelle Screening-endringene, slik at det er synlig for alle med én gang."""
+    try:
+        rader = hent_topp_overstyring_ark(_sh).get_all_records()
+        return {rad.get("Butikk"): rad.get("Handling") for rad in rader if rad.get("Butikk")}
+    except Exception:
+        return {}
+
+
+def lagre_topp_overstyring(sh, butikk, handling):
+    """Lagrer én fjern/legg-til-handling for Topp 126 rett til Google Sheets med én gang
+    den trykkes – ingen egen 'husk å lagre'-knapp å glemme etterpå. handling="" angrer en
+    tidligere fjerning/tillegg (butikken telles da ikke lenger som overstyrt)."""
+    import datetime
+    ws = hent_topp_overstyring_ark(sh)
+    eksisterende = ws.get_all_values()
+    navn_til_rad = {rad[0]: i for i, rad in enumerate(eksisterende[1:], start=2) if rad}
+    tidsstempel = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    verdier = [butikk, handling, tidsstempel]
+    if butikk in navn_til_rad:
+        ws.update(f"A{navn_til_rad[butikk]}:C{navn_til_rad[butikk]}", [verdier])
+    else:
+        ws.append_row(verdier)
+    hent_topp_overstyring.clear()
+
+
 def bruk_manuelle_endringer(r: dict, endringer_rader: list):
     """Legger lagrede manuelle endringer fra Google Sheets oppå AI-resultatene, slik at
     ALLE som åpner appen ser samme, oppdaterte bilde – ikke bare den som gjorde
@@ -1392,7 +1428,10 @@ if side == "📋 Screening":
     antall_uendret = sum(1 for s in alle if s.get("manueltEndret"))
     lc1, lc2 = st.columns([1, 3])
     with lc1:
-        if st.button(f"💾 Lagre endringer til Google Sheets ({antall_uendret})", use_container_width=True, disabled=antall_uendret == 0):
+        if st.button(
+            f"💾 Lagre endringer til Google Sheets ({antall_uendret})", use_container_width=True,
+            disabled=antall_uendret == 0, type="primary" if antall_uendret else "secondary",
+        ):
             if not _screening_sh:
                 st.error("Kunne ikke koble til Google Sheets – endringene er derfor IKKE lagret delt/holdbart ennå.")
             else:
@@ -1402,7 +1441,9 @@ if side == "📋 Screening":
                 st.success(f"✅ Lagret {antall} manuelle endringer – synlig for alle.")
     with lc2:
         if antall_uendret:
-            st.caption(f"Du har {antall_uendret} manuell(e) endring(er) som bør lagres, slik at de ikke går tapt og blir synlige for resten av juryen.")
+            # st.warning i stedet for st.caption – denne ENE knappen lagrer NÅ alt på tvers
+            # av alle faner/filtre, så den må ikke overses uansett hvilken fane man står i.
+            st.warning(f"⚠️ Du har {antall_uendret} manuell(e) endring(er) som IKKE er lagret ennå – trykk knappen til venstre for å lagre alt på tvers av alle faner, synlig for hele juryen.")
 
     fcol1, fcol2, fcol3 = st.columns([2,2,3])
     with fcol1:
@@ -1484,16 +1525,6 @@ if side == "📋 Screening":
                 r[navn]["manueltEndret"] = True
                 lagre_lokalt(r)
                 st.rerun()
-            # Lagre-knapp PER butikk, rett under Klasse – slik at man umiddelbart vet at
-            # akkurat DENNE endringen er lagret delt/holdbart, i stedet for å måtte lagre
-            # alt på én gang med en knapp lenger opp på siden.
-            if s.get("manueltEndret"):
-                if st.button("💾 Lagre", key=f"lagre_rad_{i}_{navn}", use_container_width=True):
-                    if not _screening_sh:
-                        st.error("Ikke koblet til Google Sheets ennå.")
-                    else:
-                        lagre_manuelle_endringer(_screening_sh, {navn: s})
-                        st.success(f"✅ {navn} lagret!")
         with tcol[5]:
             st.markdown(score_html(s.get("total")), unsafe_allow_html=True)
         with tcol[6]:
@@ -1550,6 +1581,27 @@ elif side == "⭐ Topp":
         medium = hent_topp126("Medium")
         stor = hent_topp126("Stor")
         alle_topp = liten + medium + stor
+
+    # Overstyringer gjort direkte i appen (fjern/legg-til enkeltbutikker) – lagret delt via
+    # Google Sheets, se punkt om Topp 126-filtrering. Gjelder OVENPÅ enten den automatiske
+    # listen eller en opplastet Excel-liste, slik at man slipper hele Excel-runden for én
+    # enkelt butikk man vil ta ut eller legge til.
+    _topp_sh = koble_gsheets()
+    _topp_overstyringer = hent_topp_overstyring(_topp_sh) if _topp_sh else {}
+    fjernet_fra_topp = {navn for navn, h in _topp_overstyringer.items() if h == "Fjernet"}
+    lagt_til_i_topp = {navn for navn, h in _topp_overstyringer.items() if h == "Lagt til"}
+
+    if fjernet_fra_topp:
+        alle_topp = [b for b in alle_topp if b.get("name") not in fjernet_fra_topp]
+    navn_i_topp = {b.get("name") for b in alle_topp}
+    for navn in sorted(lagt_til_i_topp):
+        if navn in r and navn not in navn_i_topp and navn not in fjernet_fra_topp:
+            alle_topp.append({"name": navn, **r[navn]})
+            navn_i_topp.add(navn)
+
+    liten = [b for b in alle_topp if b.get("klasse") == "Liten"]
+    medium = [b for b in alle_topp if b.get("klasse") == "Medium"]
+    stor = [b for b in alle_topp if b.get("klasse") == "Stor"]
     st.session_state["_topp300_navn"] = [b.get("name") for b in alle_topp]
 
     col1, col2, col3, col4 = st.columns(4)
@@ -1610,28 +1662,50 @@ elif side == "⭐ Topp":
             st.error(f"Kunne ikke koble til regnearket. Feilmelding: {feilmelding}")
     st.markdown("---")
 
-    tabell_df = pd.DataFrame([{
-        "Butikk": b.get("name",""), "Klasse": b.get("klasse","–"), "Bransje": b.get("bransje","–"),
-        "Org.form": b.get("orgform","–"), "URL": b.get("url",""),
-    } for b in vis_liste])
+    # Radvis liste med ➖ per butikk (i stedet for en ren st.dataframe) – slik at man kan
+    # fjerne en enkelt butikk direkte fra Topp 126 uten å gå via Excel-runden. Lagres delt
+    # for alle med én gang, se lagre_topp_overstyring(). "➕ Legg til" ligger nederst,
+    # se etter listen.
+    st.caption(f"Viser {len(vis_liste)} butikker. Trykk ➖ for å fjerne en butikk fra Topp 126, eller \"→ Vurder\" for å hoppe rett til den i Fase 1 vurdering.")
+    for i, b in enumerate(vis_liste):
+        navn = b.get("name", "")
+        url = (b.get("url", "") or "").replace("https://", "").replace("http://", "")
+        rcol = st.columns([3.5, 1, 2, 1.3, 0.7])
+        with rcol[0]:
+            st.markdown(f'<div style="font-weight:700;font-size:14px">{navn}</div><div style="font-size:11px;color:#C8102E">{url[:40]}</div>', unsafe_allow_html=True)
+        with rcol[1]:
+            st.markdown(f'<span style="font-size:11px;color:#666">{b.get("klasse","–")}</span>', unsafe_allow_html=True)
+        with rcol[2]:
+            st.markdown(f'<span style="background:#F0E8FA;color:#5B2D8E;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600">{b.get("bransje","–")}</span>', unsafe_allow_html=True)
+        with rcol[3]:
+            if st.button("→ Vurder", key=f"topp_gaa_{i}_{navn}", use_container_width=True):
+                st.session_state["_jury_valgt_butikk"] = navn
+                st.session_state.nav_side = "🧑‍⚖️ Fase 1 vurdering"
+                st.rerun()
+        with rcol[4]:
+            if st.button("➖", key=f"topp_minus_{i}_{navn}", help=f"Fjern {navn} fra Topp 126", use_container_width=True):
+                if _topp_sh:
+                    lagre_topp_overstyring(_topp_sh, navn, "Fjernet")
+                    st.success(f"✅ {navn} fjernet fra Topp 126 – synlig for alle.")
+                    st.rerun()
+                else:
+                    st.error("Kunne ikke koble til Google Sheets – ikke lagret.")
+        st.markdown('<hr style="margin:2px 0;border-color:#D8D6D2;opacity:0.3">', unsafe_allow_html=True)
 
-    def _hopp_til_jury_fra_tabell():
-        # Kjøres som on_select-callback (FØR selve rerunen) – i motsetning til å lese
-        # valget etter at st.dataframe() har returnert, unngår dette
-        # "st.session_state.nav_side cannot be modified after the widget with key
-        # nav_side is instantiated"-feilen, siden sidepanelets meny-radio allerede er
-        # tegnet på dette tidspunktet i skriptet.
-        rader = st.session_state.get("topp_tabell", {}).get("selection", {}).get("rows", [])
-        if rader:
-            navn_valgt = tabell_df.iloc[rader[0]]["Butikk"]
-            st.session_state["_jury_valgt_butikk"] = navn_valgt
-            st.session_state.nav_side = "🧑‍⚖️ Fase 1 vurdering"
-
-    st.caption("Trykk på en rad for å hoppe rett til den butikken i Fase 1 vurdering.")
-    st.dataframe(
-        tabell_df, use_container_width=True, hide_index=True,
-        selection_mode="single-row", on_select=_hopp_til_jury_fra_tabell, key="topp_tabell",
-    )
+    st.markdown("---")
+    st.markdown("**➕ Legg til en butikk i Topp 126**")
+    lcol1, lcol2 = st.columns([4, 1])
+    with lcol1:
+        utenfor_topp = sorted(navn for navn in r if navn not in navn_i_topp)
+        legg_til_valg = st.selectbox("Velg butikk", ["–"] + utenfor_topp, key="topp_legg_til_valg", label_visibility="collapsed")
+    with lcol2:
+        if st.button("➕ Legg til", key="topp_legg_til_knapp", use_container_width=True, disabled=(legg_til_valg == "–")):
+            if _topp_sh:
+                lagre_topp_overstyring(_topp_sh, legg_til_valg, "Lagt til")
+                st.success(f"✅ {legg_til_valg} lagt til i Topp 126 – synlig for alle.")
+                st.rerun()
+            else:
+                st.error("Kunne ikke koble til Google Sheets – ikke lagret.")
 
 def vis_juryside(sh, r, runde):
     """Delt innhold for Fase 1 vurdering (runde=1) og Fase 2 Ekspertvurdering (runde=2) –
