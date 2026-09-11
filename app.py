@@ -1602,25 +1602,6 @@ elif side == "⭐ Topp":
             alle_topp.append({"name": navn, **r[navn]})
             navn_i_topp.add(navn)
 
-    # Angre siste fjerning – for nettopp situasjonen der man klikket søppelbøtte-ikonet i
-    # tabellen under ved et uhell og vil ha butikken tilbake, uten å måtte skrive inn
-    # navnet nøyaktig på nytt via "+"-raden.
-    siste_fjernet = max(
-        ((navn, info["tidsstempel"]) for navn, info in _topp_overstyringer.items() if info.get("handling") == "Fjernet"),
-        key=lambda t: t[1], default=None,
-    )
-    if siste_fjernet:
-        navn_sist_fjernet, _ = siste_fjernet
-        uc1, uc2 = st.columns([3, 1])
-        uc1.caption(f"Sist fjernet fra Topp 126: **{navn_sist_fjernet}**")
-        if uc2.button("↩️ Angre fjerning", key="topp_angre_siste"):
-            if _topp_sh:
-                lagre_topp_overstyring(_topp_sh, navn_sist_fjernet, "Lagt til")
-                st.success(f"✅ {navn_sist_fjernet} lagt tilbake i Topp 126.")
-                st.rerun()
-            else:
-                st.error("Kunne ikke koble til Google Sheets – ikke lagret.")
-
     liten = [b for b in alle_topp if b.get("klasse") == "Liten"]
     medium = [b for b in alle_topp if b.get("klasse") == "Medium"]
     stor = [b for b in alle_topp if b.get("klasse") == "Stor"]
@@ -1728,6 +1709,25 @@ elif side == "⭐ Topp":
             # rad-endringer "henger igjen" og krasjer mot ny data neste gang).
             del st.session_state["topp_tabell_editor"]
             st.rerun()
+
+    # Angre siste fjerning – for situasjonen der man klikket søppelbøtte-ikonet i tabellen
+    # over ved et uhell og vil ha butikken tilbake, uten å måtte skrive inn navnet nøyaktig
+    # på nytt via "+"-raden. Ligger nederst, rett under tabellen den gjelder.
+    siste_fjernet = max(
+        ((navn, info["tidsstempel"]) for navn, info in _topp_overstyringer.items() if info.get("handling") == "Fjernet"),
+        key=lambda t: t[1], default=None,
+    )
+    if siste_fjernet:
+        navn_sist_fjernet, _ = siste_fjernet
+        uc1, uc2 = st.columns([3, 1])
+        uc1.caption(f"Sist fjernet fra Topp 126: **{navn_sist_fjernet}**")
+        if uc2.button("↩️ Angre fjerning", key="topp_angre_siste"):
+            if _topp_sh:
+                lagre_topp_overstyring(_topp_sh, navn_sist_fjernet, "Lagt til")
+                st.success(f"✅ {navn_sist_fjernet} lagt tilbake i Topp 126.")
+                st.rerun()
+            else:
+                st.error("Kunne ikke koble til Google Sheets – ikke lagret.")
 
 def vis_juryside(sh, r, runde):
     """Delt innhold for Fase 1 vurdering (runde=1) og Fase 2 Ekspertvurdering (runde=2) –
