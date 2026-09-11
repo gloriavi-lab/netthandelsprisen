@@ -410,6 +410,37 @@ def lagre_vurdering(sh, butikk, jurymedlem, runde, kategori, kriterium, score, k
     return len(alle) + 1
 
 
+def lagre_vurderinger_batch(sh, butikk, jurymedlem, runde, vurderinger):
+    """Lagrer FLERE kriterievurderinger for én butikk i ETT samlet Google Sheets-kall
+    (i stedet for ett kall per kriterium via lagre_vurdering) – samme lærdom som
+    lagre_manuelle_endringer: for mange API-kall rett etter hverandre (én butikk kan ha
+    10+ kriterier) utløste en gspread.APIError når jury lagret en vurdering."""
+    import datetime
+    ws = hent_vurderinger_ark(sh)
+    alle = ws.get_all_values()
+    rad_for_kriterium = {
+        rad[4]: i for i, rad in enumerate(alle[1:], start=2)
+        if len(rad) >= 5 and rad[0] == butikk and rad[1] == jurymedlem and str(rad[2]) == str(runde)
+    }
+    tidsstempel = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    oppdater_batch = []
+    nye_rader = []
+    for kategori, kriterium, score, kommentar in vurderinger:
+        if kriterium in rad_for_kriterium:
+            radnr = rad_for_kriterium[kriterium]
+            oppdater_batch.append({"range": f"F{radnr}:H{radnr}", "values": [[score, kommentar, tidsstempel]]})
+        else:
+            nye_rader.append([butikk, jurymedlem, runde, kategori, kriterium, score, kommentar, tidsstempel])
+
+    if oppdater_batch:
+        ws.batch_update(oppdater_batch)
+    if nye_rader:
+        ws.append_rows(nye_rader)
+    hent_vurderinger.clear()
+    return len(vurderinger)
+
+
 MANUELLE_ENDRINGER_KOLONNER = ["Butikk", "Status", "Klasse", "Enk", "ManuellKommentar", "Tidsstempel"]
 
 
@@ -1729,11 +1760,13 @@ def vis_juryside(sh, r, runde):
                     if st.session_state.get(f"_lagret_{navn}_{krit}"):
                         pass
             if st.button("💾 Lagre alle vurderinger for denne butikken", key=f"jlagre_{navn}"):
+                vurderinger = []
                 for kat, kriterieliste in kategorier_gruppert.items():
                     for krit in kriterieliste:
                         score = st.session_state.get(f"jscore_{navn}_{krit}", 3)
                         kommentar = st.session_state.get(f"jkom_{navn}_{krit}", "")
-                        lagre_vurdering(sh, navn, jurynavn, runde, kat, krit, score, kommentar)
+                        vurderinger.append((kat, krit, score, kommentar))
+                lagre_vurderinger_batch(sh, navn, jurynavn, runde, vurderinger)
                 st.success(f"Lagret vurderinger for {navn}!")
                 st.rerun()
 
