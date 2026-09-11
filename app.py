@@ -505,7 +505,10 @@ def hent_topp_overstyring(_sh) -> dict:
     manuelle Screening-endringene, slik at det er synlig for alle med én gang."""
     try:
         rader = hent_topp_overstyring_ark(_sh).get_all_records()
-        return {rad.get("Butikk"): rad.get("Handling") for rad in rader if rad.get("Butikk")}
+        return {
+            rad.get("Butikk"): {"handling": rad.get("Handling"), "tidsstempel": rad.get("Tidsstempel", "")}
+            for rad in rader if rad.get("Butikk")
+        }
     except Exception:
         return {}
 
@@ -1588,8 +1591,8 @@ elif side == "⭐ Topp":
     # enkelt butikk man vil ta ut eller legge til.
     _topp_sh = koble_gsheets()
     _topp_overstyringer = hent_topp_overstyring(_topp_sh) if _topp_sh else {}
-    fjernet_fra_topp = {navn for navn, h in _topp_overstyringer.items() if h == "Fjernet"}
-    lagt_til_i_topp = {navn for navn, h in _topp_overstyringer.items() if h == "Lagt til"}
+    fjernet_fra_topp = {navn for navn, info in _topp_overstyringer.items() if info.get("handling") == "Fjernet"}
+    lagt_til_i_topp = {navn for navn, info in _topp_overstyringer.items() if info.get("handling") == "Lagt til"}
 
     if fjernet_fra_topp:
         alle_topp = [b for b in alle_topp if b.get("name") not in fjernet_fra_topp]
@@ -1598,6 +1601,25 @@ elif side == "⭐ Topp":
         if navn in r and navn not in navn_i_topp and navn not in fjernet_fra_topp:
             alle_topp.append({"name": navn, **r[navn]})
             navn_i_topp.add(navn)
+
+    # Angre siste fjerning – for nettopp situasjonen der man klikket søppelbøtte-ikonet i
+    # tabellen under ved et uhell og vil ha butikken tilbake, uten å måtte skrive inn
+    # navnet nøyaktig på nytt via "+"-raden.
+    siste_fjernet = max(
+        ((navn, info["tidsstempel"]) for navn, info in _topp_overstyringer.items() if info.get("handling") == "Fjernet"),
+        key=lambda t: t[1], default=None,
+    )
+    if siste_fjernet:
+        navn_sist_fjernet, _ = siste_fjernet
+        uc1, uc2 = st.columns([3, 1])
+        uc1.caption(f"Sist fjernet fra Topp 126: **{navn_sist_fjernet}**")
+        if uc2.button("↩️ Angre fjerning", key="topp_angre_siste"):
+            if _topp_sh:
+                lagre_topp_overstyring(_topp_sh, navn_sist_fjernet, "Lagt til")
+                st.success(f"✅ {navn_sist_fjernet} lagt tilbake i Topp 126.")
+                st.rerun()
+            else:
+                st.error("Kunne ikke koble til Google Sheets – ikke lagret.")
 
     liten = [b for b in alle_topp if b.get("klasse") == "Liten"]
     medium = [b for b in alle_topp if b.get("klasse") == "Medium"]
