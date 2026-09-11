@@ -410,6 +410,77 @@ def lagre_vurdering(sh, butikk, jurymedlem, runde, kategori, kriterium, score, k
     return len(alle) + 1
 
 
+MANUELLE_ENDRINGER_KOLONNER = ["Butikk", "Status", "Klasse", "Enk", "ManuellKommentar", "Tidsstempel"]
+
+
+def hent_manuelle_endringer_ark(sh):
+    return hent_eller_lag_ark(sh, "Manuelle endringer", MANUELLE_ENDRINGER_KOLONNER)
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def hent_manuelle_endringer(_sh) -> list:
+    """Alle lagrede manuelle Screening-endringer (Status/Klasse/kommentar), delt mellom
+    ALLE som bruker appen – dette er det som gjør endringene holdbare på tvers av
+    redeploy og synlige for andre jurymedlemmer, i motsetning til den lokale
+    disk-cachen (lagre_lokalt), som forsvinner ved hver redeploy av appen."""
+    try:
+        return hent_manuelle_endringer_ark(_sh).get_all_records()
+    except Exception:
+        return []
+
+
+def lagre_manuelle_endringer(sh, endrede_butikker: dict):
+    """Skriver ALLE manuelt endrede butikker i ETT samlet kall (ikke ett kall per
+    butikk) – lærdom fra en tidligere gspread.APIError i produksjon pga. for mange
+    Google Sheets-API-kall på kort tid."""
+    import datetime
+    ws = hent_manuelle_endringer_ark(sh)
+    eksisterende = ws.get_all_values()
+    navn_til_rad = {rad[0]: i for i, rad in enumerate(eksisterende[1:], start=2) if rad}
+    tidsstempel = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    oppdater_batch = []
+    nye_rader = []
+    for navn, info in endrede_butikker.items():
+        verdier = [
+            navn, info.get("status", ""), info.get("klasse", ""),
+            str(bool(info.get("enk", False))), info.get("manuellKommentar", ""), tidsstempel,
+        ]
+        if navn in navn_til_rad:
+            radnr = navn_til_rad[navn]
+            oppdater_batch.append({"range": f"A{radnr}:F{radnr}", "values": [verdier]})
+        else:
+            nye_rader.append(verdier)
+
+    if oppdater_batch:
+        ws.batch_update(oppdater_batch)
+    if nye_rader:
+        ws.append_rows(nye_rader)
+    hent_manuelle_endringer.clear()
+    return len(endrede_butikker)
+
+
+def bruk_manuelle_endringer(r: dict, endringer_rader: list):
+    """Legger lagrede manuelle endringer fra Google Sheets oppå AI-resultatene, slik at
+    ALLE som åpner appen ser samme, oppdaterte bilde – ikke bare den som gjorde
+    endringen i sin egen nettleserøkt."""
+    for rad in endringer_rader:
+        navn = rad.get("Butikk")
+        if not navn or navn not in r:
+            continue
+        if rad.get("Status"):
+            r[navn]["status"] = rad["Status"]
+        klasse = rad.get("Klasse")
+        if klasse == "ENK":
+            r[navn]["enk"] = True
+        elif klasse:
+            r[navn]["enk"] = False
+            r[navn]["klasse"] = klasse
+        if rad.get("ManuellKommentar"):
+            r[navn]["manuellKommentar"] = rad["ManuellKommentar"]
+        r[navn]["manueltEndret"] = True
+
+
 def beregn_snittscore_per_butikk(vurderinger: list) -> dict:
     """Snittscore per butikk på tvers av alle kriterier og jurymedlemmer som har vurdert den."""
     from collections import defaultdict
@@ -1248,6 +1319,15 @@ if side == "📋 Screening":
         st.info("💡 Last opp resultater.json fra Colab i sidepanelet til venstre.")
         st.stop()
     r = st.session_state.resultater
+
+    # Henter manuelle endringer (Status/Klasse/kommentar) andre jurymedlemmer har lagret
+    # til Google Sheets, og legger dem oppå AI-resultatene – se bruk_manuelle_endringer().
+    # Mellomlagret 30 sek (hent_manuelle_endringer), så dette er billig selv om siden
+    # lastes ofte, og alle ser samme, oppdaterte bilde uavhengig av hvem som lagret sist.
+    _screening_sh = koble_gsheets()
+    if _screening_sh:
+        bruk_manuelle_endringer(r, hent_manuelle_endringer(_screening_sh))
+
     alle = list(r.values())
     filtre_def = [
         ("alle","Totalt",len(alle),"#1A1A1A"),
@@ -1273,6 +1353,25 @@ if side == "📋 Screening":
                     st.session_state.screening_filter = key
                     st.session_state.valgt_butikk = None
                     st.rerun()
+
+    # Manuelle endringer (Status/Klasse/kommentar) oppdaterer skjermbildet med én gang,
+    # men er kun HOLDBARE og synlige for andre når de lagres hit – se punktet i planen om
+    # hvorfor lokal diskfil (lagre_lokalt) alene ikke holder på Streamlit Cloud.
+    antall_uendret = sum(1 for s in alle if s.get("manueltEndret"))
+    lc1, lc2 = st.columns([1, 3])
+    with lc1:
+        if st.button(f"💾 Lagre endringer til Google Sheets ({antall_uendret})", use_container_width=True, disabled=antall_uendret == 0):
+            if not _screening_sh:
+                st.error("Kunne ikke koble til Google Sheets – endringene er derfor IKKE lagret delt/holdbart ennå.")
+            else:
+                endrede = {s.get("name"): s for s in alle if s.get("manueltEndret")}
+                with st.spinner("Lagrer..."):
+                    antall = lagre_manuelle_endringer(_screening_sh, endrede)
+                st.success(f"✅ Lagret {antall} manuelle endringer – synlig for alle.")
+    with lc2:
+        if antall_uendret:
+            st.caption(f"Du har {antall_uendret} manuell(e) endring(er) som bør lagres, slik at de ikke går tapt og blir synlige for resten av juryen.")
+
     fcol1, fcol2, fcol3 = st.columns([2,2,3])
     with fcol1:
         klasse_f = st.selectbox("Klasse", ["Alle","Liten","Medium","Stor"])
