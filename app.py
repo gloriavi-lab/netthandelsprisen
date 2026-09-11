@@ -1429,7 +1429,7 @@ if side == "📋 Screening":
     lc1, lc2 = st.columns([1, 3])
     with lc1:
         if st.button(
-            f"💾 Lagre endringer til Google Sheets ({antall_uendret})", use_container_width=True,
+            "💾 Lagre", use_container_width=True, help=f"{antall_uendret} ulagret(e) endring(er)" if antall_uendret else "Ingen ulagrede endringer",
             disabled=antall_uendret == 0, type="primary" if antall_uendret else "secondary",
         ):
             if not _screening_sh:
@@ -1662,50 +1662,50 @@ elif side == "⭐ Topp":
             st.error(f"Kunne ikke koble til regnearket. Feilmelding: {feilmelding}")
     st.markdown("---")
 
-    # Radvis liste med ➖ per butikk (i stedet for en ren st.dataframe) – slik at man kan
-    # fjerne en enkelt butikk direkte fra Topp 126 uten å gå via Excel-runden. Lagres delt
-    # for alle med én gang, se lagre_topp_overstyring(). "➕ Legg til" ligger nederst,
-    # se etter listen.
-    st.caption(f"Viser {len(vis_liste)} butikker. Trykk ➖ for å fjerne en butikk fra Topp 126, eller \"→ Vurder\" for å hoppe rett til den i Fase 1 vurdering.")
-    for i, b in enumerate(vis_liste):
-        navn = b.get("name", "")
-        url = (b.get("url", "") or "").replace("https://", "").replace("http://", "")
-        rcol = st.columns([3.5, 1, 2, 1.3, 0.7])
-        with rcol[0]:
-            st.markdown(f'<div style="font-weight:700;font-size:14px">{navn}</div><div style="font-size:11px;color:#C8102E">{url[:40]}</div>', unsafe_allow_html=True)
-        with rcol[1]:
-            st.markdown(f'<span style="font-size:11px;color:#666">{b.get("klasse","–")}</span>', unsafe_allow_html=True)
-        with rcol[2]:
-            st.markdown(f'<span style="background:#F0E8FA;color:#5B2D8E;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600">{b.get("bransje","–")}</span>', unsafe_allow_html=True)
-        with rcol[3]:
-            if st.button("→ Vurder", key=f"topp_gaa_{i}_{navn}", use_container_width=True):
-                st.session_state["_jury_valgt_butikk"] = navn
-                st.session_state.nav_side = "🧑‍⚖️ Fase 1 vurdering"
-                st.rerun()
-        with rcol[4]:
-            if st.button("➖", key=f"topp_minus_{i}_{navn}", help=f"Fjern {navn} fra Topp 126", use_container_width=True):
-                if _topp_sh:
-                    lagre_topp_overstyring(_topp_sh, navn, "Fjernet")
-                    st.success(f"✅ {navn} fjernet fra Topp 126 – synlig for alle.")
-                    st.rerun()
-                else:
-                    st.error("Kunne ikke koble til Google Sheets – ikke lagret.")
-        st.markdown('<hr style="margin:2px 0;border-color:#D8D6D2;opacity:0.3">', unsafe_allow_html=True)
+    # Én tabell (som før), men redigerbar: søppelbøtte-ikonet på en rad fjerner butikken fra
+    # Topp 126, og "+ Legg til rad" nederst i tabellen legger en butikk til – skriv inn
+    # butikknavnet NØYAKTIG som det står i resultatene. Lagres delt for alle med én gang,
+    # se lagre_topp_overstyring(). Andre kolonner er låst (kun Butikk-kolonnen kan endres),
+    # slik at det ikke ser ut som Klasse/Bransje kan redigeres herfra.
+    tabell_df = pd.DataFrame([{
+        "Butikk": b.get("name",""), "Klasse": b.get("klasse","–"), "Bransje": b.get("bransje","–"),
+        "Org.form": b.get("orgform","–"), "URL": b.get("url",""),
+    } for b in vis_liste])
 
-    st.markdown("---")
-    st.markdown("**➕ Legg til en butikk i Topp 126**")
-    lcol1, lcol2 = st.columns([4, 1])
-    with lcol1:
-        utenfor_topp = sorted(navn for navn in r if navn not in navn_i_topp)
-        legg_til_valg = st.selectbox("Velg butikk", ["–"] + utenfor_topp, key="topp_legg_til_valg", label_visibility="collapsed")
-    with lcol2:
-        if st.button("➕ Legg til", key="topp_legg_til_knapp", use_container_width=True, disabled=(legg_til_valg == "–")):
-            if _topp_sh:
-                lagre_topp_overstyring(_topp_sh, legg_til_valg, "Lagt til")
-                st.success(f"✅ {legg_til_valg} lagt til i Topp 126 – synlig for alle.")
-                st.rerun()
-            else:
-                st.error("Kunne ikke koble til Google Sheets – ikke lagret.")
+    st.caption(f"Viser {len(vis_liste)} butikker. Fjern en rad (søppelbøtte-ikonet til venstre) for å ta butikken ut av Topp 126. Trykk \"+\" nederst i tabellen og skriv inn butikknavnet nøyaktig for å legge en butikk til.")
+    redigert_df = st.data_editor(
+        tabell_df, use_container_width=True, hide_index=True, num_rows="dynamic", key="topp_tabell_editor",
+        column_config={
+            "Klasse": st.column_config.TextColumn(disabled=True),
+            "Bransje": st.column_config.TextColumn(disabled=True),
+            "Org.form": st.column_config.TextColumn(disabled=True),
+            "URL": st.column_config.TextColumn(disabled=True),
+        },
+    )
+
+    opprinnelige_navn = set(tabell_df["Butikk"])
+    nye_navn = set(n for n in redigert_df["Butikk"] if n)
+    fjernet_i_tabell = opprinnelige_navn - nye_navn
+    lagt_til_i_tabell = nye_navn - opprinnelige_navn
+    if fjernet_i_tabell or lagt_til_i_tabell:
+        if not _topp_sh:
+            st.error("Kunne ikke koble til Google Sheets – endringen er IKKE lagret.")
+        else:
+            ukjente = [navn for navn in lagt_til_i_tabell if navn not in r]
+            for navn in fjernet_i_tabell:
+                lagre_topp_overstyring(_topp_sh, navn, "Fjernet")
+            for navn in lagt_til_i_tabell:
+                if navn in r:
+                    lagre_topp_overstyring(_topp_sh, navn, "Lagt til")
+            if ukjente:
+                st.error(f"Fant ikke butikken(e) {', '.join(ukjente)} blant nettbutikkene i resultatene – sjekk stavingen (ikke lagt til).")
+            if fjernet_i_tabell or (lagt_til_i_tabell - set(ukjente)):
+                st.success("✅ Endringer i Topp 126-listen lagret – synlig for alle.")
+            # Nullstiller redigerings-state for tabellen, slik at den bygges helt på nytt fra
+            # den nå oppdaterte, lagrede listen ved neste kjøring (unngår at gamle
+            # rad-endringer "henger igjen" og krasjer mot ny data neste gang).
+            del st.session_state["topp_tabell_editor"]
+            st.rerun()
 
 def vis_juryside(sh, r, runde):
     """Delt innhold for Fase 1 vurdering (runde=1) og Fase 2 Ekspertvurdering (runde=2) –
