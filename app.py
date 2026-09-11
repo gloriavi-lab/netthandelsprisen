@@ -1066,16 +1066,17 @@ def vis_detaljpanel(butikk, juryvurderinger={}):
 
     st.markdown('<div class="section-title">Logistikkpartnere</div>', unsafe_allow_html=True)
     logi = butikk.get("logistikk") or {}
-    lcols = st.columns(len(LOGISTIKK_AKTORER))
-    noen_funnet = False
-    for j, aktør in enumerate(LOGISTIKK_AKTORER):
+    # Viser kun de FAKTISK identifiserte partnerne som kompakte badges, i stedet for et
+    # rutenett med alle 9 mulige (der de fleste var grå/tomme) – det så rotete og
+    # forvirrende ut, spesielt på smalere skjermer der cellene brøt rart.
+    funnet = []
+    for aktør in LOGISTIKK_AKTORER:
         val = logi.get(aktør, False)
-        har = bool(val) and val not in (False, "false", 0, None, "")
-        if har:
-            noen_funnet = True
-        css = "logi-yes" if har else "logi-no"
-        ikon = "● " if har else ""
-        lcols[j].markdown(f'<div class="logi-box {css}">{ikon}{aktør}</div>', unsafe_allow_html=True)
+        if bool(val) and val not in (False, "false", 0, None, ""):
+            funnet.append(aktør)
+    noen_funnet = bool(funnet)
+    if funnet:
+        st.markdown(" ".join(f'<span class="logi-box logi-yes">● {a}</span>' for a in funnet), unsafe_allow_html=True)
     if not noen_funnet:
         sk = butikk.get("sidekontroll")
         if not sk or not sk.get("besokt"):
@@ -1337,7 +1338,7 @@ if side == "📋 Screening":
         # én, siden de overlappet og ga forvirring – de 234 alvorlige tilfellene (sitekontroll
         # feilet / usikker om ekte nettbutikk) er en delmengde av disse 351. Selve årsaken vises
         # fortsatt per butikk i "Vis detaljer".
-        ("manuell_sjekk","⚠️ Manuell sjekk kreves",sum(1 for s in alle if s.get("krevManuellSjekk")),"#E8A020"),
+        ("manuell_sjekk","⚠️ Manuell sjekk kreves",sum(1 for s in alle if s.get("krevManuellSjekk") and not s.get("manueltEndret")),"#E8A020"),
         ("enk","ENK",sum(1 for s in alle if s.get("enk")),"#C8102E"),
         ("liten","Liten",sum(1 for s in alle if s.get("klasse")=="Liten"),"#0D4A8A"),
         ("medium","Medium",sum(1 for s in alle if s.get("klasse")=="Medium"),"#7A4800"),
@@ -1384,7 +1385,7 @@ if side == "📋 Screening":
     cf = st.session_state.screening_filter
     if cf == "inn": vis = [s for s in vis if s.get("status")=="inn" and not s.get("enk")]
     elif cf == "ut": vis = [s for s in vis if s.get("status")=="ut" and not s.get("enk")]
-    elif cf == "manuell_sjekk": vis = [s for s in vis if s.get("krevManuellSjekk")]
+    elif cf == "manuell_sjekk": vis = [s for s in vis if s.get("krevManuellSjekk") and not s.get("manueltEndret")]
     elif cf == "enk": vis = [s for s in vis if s.get("enk")]
     elif cf == "liten": vis = [s for s in vis if s.get("klasse")=="Liten"]
     elif cf == "medium": vis = [s for s in vis if s.get("klasse")=="Medium"]
@@ -1452,6 +1453,16 @@ if side == "📋 Screening":
                 r[navn]["manueltEndret"] = True
                 lagre_lokalt(r)
                 st.rerun()
+            # Lagre-knapp PER butikk, rett under Klasse – slik at man umiddelbart vet at
+            # akkurat DENNE endringen er lagret delt/holdbart, i stedet for å måtte lagre
+            # alt på én gang med en knapp lenger opp på siden.
+            if s.get("manueltEndret"):
+                if st.button("💾 Lagre", key=f"lagre_rad_{i}_{navn}", use_container_width=True):
+                    if not _screening_sh:
+                        st.error("Ikke koblet til Google Sheets ennå.")
+                    else:
+                        lagre_manuelle_endringer(_screening_sh, {navn: s})
+                        st.success(f"✅ {navn} lagret!")
         with tcol[5]:
             st.markdown(score_html(s.get("total")), unsafe_allow_html=True)
         with tcol[6]:
