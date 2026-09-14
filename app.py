@@ -514,19 +514,38 @@ def hent_topp_overstyring(_sh) -> dict:
 
 
 def lagre_topp_overstyring(sh, butikk, handling):
-    """Lagrer én fjern/legg-til-handling for Topp 126 rett til Google Sheets med én gang
-    den trykkes – ingen egen 'husk å lagre'-knapp å glemme etterpå. handling="" angrer en
+    """Lagrer ÉN fjern/legg-til-handling for Topp 126. Kun for enkeltstående kall (f.eks.
+    "Angre fjerning"-knappen) – ved FLERE butikker samtidig, bruk lagre_topp_overstyring_batch
+    i stedet, ellers gjentas samme gspread.APIError-mønster som andre steder i appen."""
+    lagre_topp_overstyring_batch(sh, {butikk: handling})
+
+
+def lagre_topp_overstyring_batch(sh, endringer: dict):
+    """Lagrer FLERE fjern/legg-til-handlinger for Topp 126 i ETT samlet Google Sheets-kall
+    (i stedet for ett kall per butikk) – samme lærdom som lagre_manuelle_endringer og
+    lagre_vurderinger_batch: å legge til/fjerne flere butikker på én gang (f.eks. flere
+    nye rader i tabellen samtidig) utløste en gspread.APIError. handling="" angrer en
     tidligere fjerning/tillegg (butikken telles da ikke lenger som overstyrt)."""
     import datetime
     ws = hent_topp_overstyring_ark(sh)
     eksisterende = ws.get_all_values()
     navn_til_rad = {rad[0]: i for i, rad in enumerate(eksisterende[1:], start=2) if rad}
     tidsstempel = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-    verdier = [butikk, handling, tidsstempel]
-    if butikk in navn_til_rad:
-        ws.update(f"A{navn_til_rad[butikk]}:C{navn_til_rad[butikk]}", [verdier])
-    else:
-        ws.append_row(verdier)
+
+    oppdater_batch = []
+    nye_rader = []
+    for butikk, handling in endringer.items():
+        verdier = [butikk, handling, tidsstempel]
+        if butikk in navn_til_rad:
+            radnr = navn_til_rad[butikk]
+            oppdater_batch.append({"range": f"A{radnr}:C{radnr}", "values": [verdier]})
+        else:
+            nye_rader.append(verdier)
+
+    if oppdater_batch:
+        ws.batch_update(oppdater_batch)
+    if nye_rader:
+        ws.append_rows(nye_rader)
     hent_topp_overstyring.clear()
 
 
@@ -1698,11 +1717,10 @@ elif side == "⭐ Topp":
             st.error("Kunne ikke koble til Google Sheets – endringen er IKKE lagret.")
         else:
             ukjente = [navn for navn in lagt_til_i_tabell if navn not in r]
-            for navn in fjernet_i_tabell:
-                lagre_topp_overstyring(_topp_sh, navn, "Fjernet")
-            for navn in lagt_til_i_tabell:
-                if navn in r:
-                    lagre_topp_overstyring(_topp_sh, navn, "Lagt til")
+            endringer = {navn: "Fjernet" for navn in fjernet_i_tabell}
+            endringer.update({navn: "Lagt til" for navn in lagt_til_i_tabell if navn in r})
+            if endringer:
+                lagre_topp_overstyring_batch(_topp_sh, endringer)
             if ukjente:
                 st.error(f"Fant ikke butikken(e) {', '.join(ukjente)} blant nettbutikkene i resultatene – sjekk stavingen (ikke lagt til).")
             if fjernet_i_tabell or (lagt_til_i_tabell - set(ukjente)):
