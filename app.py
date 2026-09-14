@@ -967,7 +967,7 @@ with st.sidebar:
             st.session_state.valgt_butikk = None
 
     st.markdown("---")
-    side = st.radio("Naviger", ["📋 Screening", "⭐ Topp", "🧑‍⚖️ Fase 1 vurdering", "🎓 Fase 2 Ekspertvurdering", "🏆 Finale", "📦 Logistikk", "ℹ️ Informasjon"], label_visibility="collapsed", key="nav_side")
+    side = st.radio("Naviger", ["📋 Screening", "⭐ Topp", "🧑‍⚖️ Fase 1 vurdering", "🎓 Fase 2 Ekspertvurdering", "🏆 Finale", "📦 Logistikk", "ℹ️ Informasjon", "🧮 Modellteknisk info"], label_visibility="collapsed", key="nav_side")
     NAV_FORKLARING = {
         "📋 Screening": "Alle butikker og deres score, filtrerbart",
         "⭐ Topp": "Butikkene som går videre til juryen",
@@ -976,6 +976,7 @@ with st.sidebar:
         "🏆 Finale": "Finalister basert på jury sin vurdering",
         "📦 Logistikk": "Hvem bruker Posten/Bring – salgsmuligheter",
         "ℹ️ Informasjon": "Om kriteriene og hvordan scoring virker",
+        "🧮 Modellteknisk info": "Scoringsmodellens vekting og hva som er fjernet fra vurderingen",
     }
     st.caption(NAV_FORKLARING.get(side, ""))
 
@@ -1428,25 +1429,25 @@ if side == "📋 Screening":
     # Manuelle endringer (Status/Klasse/kommentar) oppdaterer skjermbildet med én gang,
     # men er kun HOLDBARE og synlige for andre når de lagres hit – se punktet i planen om
     # hvorfor lokal diskfil (lagre_lokalt) alene ikke holder på Streamlit Cloud.
-    antall_uendret = sum(1 for s in alle if s.get("manueltEndret"))
-    lc1, lc2 = st.columns([1, 3])
-    with lc1:
-        if st.button(
-            "💾 Lagre", use_container_width=True, help=f"{antall_uendret} ulagret(e) endring(er)" if antall_uendret else "Ingen ulagrede endringer",
-            disabled=antall_uendret == 0, type="primary" if antall_uendret else "secondary",
-        ):
-            if not _screening_sh:
-                st.error("Kunne ikke koble til Google Sheets – endringene er derfor IKKE lagret delt/holdbart ennå.")
-            else:
-                endrede = {s.get("name"): s for s in alle if s.get("manueltEndret")}
-                with st.spinner("Lagrer..."):
-                    antall = lagre_manuelle_endringer(_screening_sh, endrede)
-                st.success(f"✅ Lagret {antall} manuelle endringer – synlig for alle.")
-    with lc2:
-        if antall_uendret:
-            # st.warning i stedet for st.caption – denne ENE knappen lagrer NÅ alt på tvers
-            # av alle faner/filtre, så den må ikke overses uansett hvilken fane man står i.
-            st.warning(f"⚠️ Du har {antall_uendret} manuell(e) endring(er) som IKKE er lagret ennå – trykk knappen til venstre for å lagre alt på tvers av alle faner, synlig for hele juryen.")
+    # "ulagretLokalt" (i motsetning til "manueltEndret", som ALLTID er True for enhver rad
+    # som noensinne er lagret – også fra Sheets ved sideinnlasting) er det eneste presise
+    # målet på "endret i DENNE økten, men ikke lagret ennå". Uten dette skillet forble
+    # knappen/telleren "på" for alltid for enhver rad som noen gang var lagret.
+    antall_uendret = sum(1 for s in alle if s.get("ulagretLokalt"))
+    if st.button(
+        "💾 Lagre", help=f"{antall_uendret} ulagret(e) endring(er)" if antall_uendret else "Ingen ulagrede endringer",
+        disabled=antall_uendret == 0, type="primary" if antall_uendret else "secondary",
+    ):
+        if not _screening_sh:
+            st.error("Kunne ikke koble til Google Sheets – endringene er derfor IKKE lagret delt/holdbart ennå.")
+        else:
+            endrede = {s.get("name"): s for s in alle if s.get("ulagretLokalt")}
+            with st.spinner("Lagrer..."):
+                antall = lagre_manuelle_endringer(_screening_sh, endrede)
+            for s in endrede.values():
+                s["ulagretLokalt"] = False
+            lagre_lokalt(r)
+            st.success(f"✅ Lagret {antall} manuelle endringer – synlig for alle.")
 
     fcol1, fcol2, fcol3 = st.columns([2,2,3])
     with fcol1:
@@ -1502,6 +1503,7 @@ if side == "📋 Screening":
             if ny_status != s.get("status"):
                 r[navn]["status"] = ny_status
                 r[navn]["manueltEndret"] = True
+                r[navn]["ulagretLokalt"] = True
                 lagre_lokalt(r)
                 # Trygt å bruke her (testet): statistikk-tallene øverst leses FØR denne
                 # løkken kjører, så uten en ny kjøring ville de vist forrige tall til
@@ -1526,6 +1528,7 @@ if side == "📋 Screening":
                     r[navn]["enk"] = False
                     r[navn]["klasse"] = klasse_valgt
                 r[navn]["manueltEndret"] = True
+                r[navn]["ulagretLokalt"] = True
                 lagre_lokalt(r)
                 st.rerun()
         with tcol[5]:
@@ -2109,6 +2112,19 @@ elif side == "ℹ️ Informasjon":
     | **Medium** | 50–250 mill kr |
     | **Stor** | Over 250 mill kr |
 
+    ### Portvokterkriterier
+    - **ENK (Enkeltmannsforetak)** – filtreres automatisk ut
+    - **Ingen URL funnet** – kan ikke identifiseres, filtreres ut
+    - **Ikke en fungerende nettbutikk** – rene informasjonssider uten kjøpsfunksjon filtreres ut
+    - **Kjøpsvilkår ikke funnet** – flagges for manuell sjekk (filtreres IKKE automatisk ut lenger,
+      for å unngå at seriøse butikker feilaktig ekskluderes pga. bot-beskyttelse)
+
+    ### Versjon 8.0 · August 2026 · Posten Bring
+    """)
+
+elif side == "🧮 Modellteknisk info":
+    st.header("🧮 Modellteknisk info")
+    st.markdown("""
     ### Scoringsmodell – 3 kategorier, 33% vekt hver
     | Kategori | Vekt | Kriterier |
     |---|---|---|
@@ -2128,13 +2144,4 @@ elif side == "ℹ️ Informasjon":
       checkout-flyten ga for vage/upålitelige resultater til å inngå i totalscoren.
     - **Trustpilot-oppslag** – fjernet, ikke lenger en del av vurderingen.
     - **Mobilvennlighet** – fjernet tidligere, testes ikke lenger.
-
-    ### Portvokterkriterier
-    - **ENK (Enkeltmannsforetak)** – filtreres automatisk ut
-    - **Ingen URL funnet** – kan ikke identifiseres, filtreres ut
-    - **Ikke en fungerende nettbutikk** – rene informasjonssider uten kjøpsfunksjon filtreres ut
-    - **Kjøpsvilkår ikke funnet** – flagges for manuell sjekk (filtreres IKKE automatisk ut lenger,
-      for å unngå at seriøse butikker feilaktig ekskluderes pga. bot-beskyttelse)
-
-    ### Versjon 8.0 · August 2026 · Posten Bring
     """)
