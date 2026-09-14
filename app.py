@@ -1729,6 +1729,12 @@ elif side == "⭐ Topp":
             # den nå oppdaterte, lagrede listen ved neste kjøring (unngår at gamle
             # rad-endringer "henger igjen" og krasjer mot ny data neste gang).
             del st.session_state["topp_tabell_editor"]
+            # Tving en fersk synk til den speilede Google Sheets-fanen på NESTE kjøring (der
+            # alle_topp er korrekt gjenoppbygd med denne endringen) – uten dette kunne en
+            # endring bli "usynlig" der i opptil 90 sekunder, eller druknet av en annen
+            # endring i samme vindu (90-sekunders-syklusen tar kun høyde for TID, ikke om
+            # listen faktisk er endret siden sist).
+            st.session_state["_topp_ark_siste_oppdatering"] = 0
             st.rerun()
 
     # Angre siste fjerning – for situasjonen der man klikket søppelbøtte-ikonet i tabellen
@@ -1745,6 +1751,7 @@ elif side == "⭐ Topp":
         if uc2.button("↩️ Angre fjerning", key="topp_angre_siste"):
             if _topp_sh:
                 lagre_topp_overstyring(_topp_sh, navn_sist_fjernet, "Lagt til")
+                st.session_state["_topp_ark_siste_oppdatering"] = 0
                 st.success(f"✅ {navn_sist_fjernet} lagt tilbake i Topp 126.")
                 st.rerun()
             else:
